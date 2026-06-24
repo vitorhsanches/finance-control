@@ -177,15 +177,65 @@ function AuthScreen() {
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    if (!supabase) return;
-    setMessage('Processando...');
-    const result = mode === 'login'
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password });
-    if (result.error) setMessage(result.error.message);
-    else setMessage(mode === 'signup' ? 'Cadastro criado. Verifique o e-mail se a confirmação estiver ativa.' : 'Login realizado.');
+    if (!supabase || loading) return;
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setMessage('Informe um e-mail válido.');
+      return;
+    }
+
+    if (cleanPassword.length < 8) {
+      setMessage('A senha precisa ter pelo menos 8 caracteres.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setMessage(mode === 'login' ? 'Entrando...' : 'Criando conta...');
+
+      const result = mode === 'login'
+        ? await supabase.auth.signInWithPassword({ email: cleanEmail, password: cleanPassword })
+        : await supabase.auth.signUp({
+            email: cleanEmail,
+            password: cleanPassword,
+            options: {
+              emailRedirectTo: window.location.origin
+            }
+          });
+
+      if (result.error) {
+        const msg = result.error.message;
+        if (msg.toLowerCase().includes('invalid login credentials')) {
+          setMessage('E-mail ou senha inválidos. Se ainda não criou conta, clique em Criar uma nova conta.');
+        } else if (msg.toLowerCase().includes('email rate limit exceeded')) {
+          setMessage('Limite de e-mails do Supabase atingido. Para testes, desative a confirmação de e-mail no Supabase ou configure SMTP.');
+        } else {
+          setMessage(msg);
+        }
+        return;
+      }
+
+      if (mode === 'signup') {
+        if (result.data.session) {
+          setMessage('Conta criada. Entrando...');
+        } else {
+          setMessage('Conta criada. Confirme o e-mail antes de entrar, se a confirmação estiver ativa no Supabase.');
+        }
+      } else {
+        setMessage('Login realizado.');
+      }
+    } catch (error) {
+      console.error(error);
+      setMessage('Não foi possível conectar ao Supabase. Verifique URL, chave e conexão.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -194,10 +244,10 @@ function AuthScreen() {
         <div className="brand center"><div className="brand-mark">FC</div><strong>Finance Control</strong></div>
         <h1>{mode === 'login' ? 'Entrar' : 'Criar conta'}</h1>
         <p>Seus dados financeiros ficam separados por usuário no Supabase.</p>
-        <label className="field"><span>E-mail</span><input value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-        <label className="field"><span>Senha</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-        <button className="primary full" onClick={submit}>{mode === 'login' ? 'Entrar' : 'Criar conta'}</button>
-        <button className="link-button" onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
+        <label className="field"><span>E-mail</span><input value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} /></label>
+        <label className="field"><span>Senha</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} /></label>
+        <button className="primary full" onClick={submit} disabled={loading}>{loading ? 'Aguarde...' : mode === 'login' ? 'Entrar' : 'Criar conta'}</button>
+        <button className="link-button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage(''); }}>
           {mode === 'login' ? 'Criar uma nova conta' : 'Já tenho conta'}
         </button>
         {message && <div className="notice">{message}</div>}
@@ -263,7 +313,7 @@ function TransactionsPage({ state, updateState, month }: PageProps & { month: st
   const rows = state.transactions.filter((t) => ym(t.date) === month).filter((t) => category === 'Todos' || t.category === category).filter((t) => type === 'Todos' || t.type === type);
   const categories = [...state.settings.incomeCategories, ...state.settings.categories];
 
-  const add = () => updateState((prev) => ({ ...prev, transactions: [{ id: uid('tr'), date: todayISO(), description: 'Novo lançamento', type: 'expense', category: 'Outros', amount: 0, paymentMethod: 'Pix', accountOrCard: prev.settings.accounts[0] || 'Conta', essential: false, paid: true }, ...prev.transactions] }));
+  const add = () => updateState((prev) => ({ ...prev, transactions: [{ id: uid('tr'), date: month === currentMonth() ? todayISO() : `${month}-01`, description: 'Novo lançamento', type: 'expense', category: 'Outros', amount: 0, paymentMethod: 'Pix', accountOrCard: prev.settings.accounts[0] || 'Conta', essential: false, paid: true }, ...prev.transactions] }));
   const patch = (id: string, patch: Partial<Transaction>) => updateState((prev) => ({ ...prev, transactions: prev.transactions.map((t) => t.id === id ? { ...t, ...patch } : t) }));
   const remove = (id: string) => updateState((prev) => ({ ...prev, transactions: prev.transactions.filter((t) => t.id !== id) }));
 
