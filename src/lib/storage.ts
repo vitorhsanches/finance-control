@@ -333,18 +333,23 @@ function billToRow(userId: string, item: FutureBill) {
 }
 
 function rowToInvestment(row: any): Investment {
+  const initialAmount = Number(row.initial_amount || 0);
+  const rawCurrentAmount = Number(row.current_amount || 0);
+
   return {
     id: row.id,
     type: row.type || '',
     institution: row.institution || '',
-    initialAmount: Number(row.initial_amount || 0),
-    currentAmount: Number(row.current_amount || 0),
+    initialAmount,
+    currentAmount:
+      initialAmount > 0 && rawCurrentAmount === 0
+        ? initialAmount
+        : rawCurrentAmount,
     liquidity: row.liquidity || '',
     goal: row.goal || '',
     notes: row.notes || ''
   };
 }
-
 function investmentToRow(userId: string, item: Investment) {
   return {
     user_id: userId,
@@ -352,7 +357,10 @@ function investmentToRow(userId: string, item: Investment) {
     type: item.type || '',
     institution: item.institution || '',
     initial_amount: item.initialAmount || 0,
-    current_amount: item.currentAmount || 0,
+    current_amount:
+    item.initialAmount > 0 && item.currentAmount === 0
+      ? item.initialAmount
+      : item.currentAmount || 0,
     liquidity: item.liquidity || '',
     goal: item.goal || '',
     notes: item.notes || null,
