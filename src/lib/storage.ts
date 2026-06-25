@@ -58,6 +58,8 @@ export async function saveProfile(userId: string, displayName: string) {
   );
 }
 
+
+
 export async function loadRemoteState(userId: string): Promise<FinanceState> {
   if (!supabase) return loadLocalState();
 
@@ -214,6 +216,18 @@ async function throwIfError(request: PromiseLike<{ error: unknown }>) {
   if (error) throw error;
 }
 
+function ensureDate(value: unknown): string {
+  if (typeof value !== 'string') return new Date().toISOString().slice(0, 10);
+
+  const trimmed = value.trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  return new Date().toISOString().slice(0, 10);
+}
+
 function rowToTransaction(row: any): Transaction {
   return {
     id: row.id,
@@ -237,7 +251,7 @@ function transactionToRow(userId: string, item: Transaction) {
   return {
     user_id: userId,
     id: item.id,
-    date: item.date || null,
+    date: ensureDate(item.date),
     description: item.description || '',
     type: item.type,
     category: item.category || '',

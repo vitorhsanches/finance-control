@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AreaChart,
@@ -111,8 +111,9 @@ export function App() {
   const [profileMessage, setProfileMessage] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
-  const [remoteReady, setRemoteReady] = useState(!isSupabaseConfigured);
-  const saveTimer = useRef<number | null>(null);
+  const [, setRemoteReady] = useState(!isSupabaseConfigured);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const selectedMonth = state.settings.selectedMonth || currentMonth();
 
@@ -125,6 +126,9 @@ export function App() {
         setRemoteReady(false);
         setStatus("Carregando dados online...");
         const remote = await loadRemoteState(session.user.id);
+        setHasUnsavedChanges(false);
+        setLastSavedAt(null);
+        setSaveError(null);
         const profile = await loadProfile(session.user.id);
         setDisplayName(profile.displayName);
         setDisplayNameDraft(profile.displayName);
@@ -134,7 +138,6 @@ export function App() {
         setUserId(session.user.id);
         setEmail(session.user.email || null);
         setRemoteReady(true);
-        setStatus("Dados online sincronizados");
         } else {
           setRemoteReady(false);
           setUserId(null);
@@ -152,6 +155,9 @@ export function App() {
           setRemoteReady(false);
           setStatus("Carregando dados online...");
           const remote = await loadRemoteState(session.user.id);
+          setHasUnsavedChanges(false);
+          setLastSavedAt(null);
+          setSaveError(null);
           const profile = await loadProfile(session.user.id);
           setDisplayName(profile.displayName);
           setDisplayNameDraft(profile.displayName);
@@ -181,25 +187,27 @@ export function App() {
 
   useEffect(() => {
     saveLocalState(state);
-    if (!supabase || !userId || !remoteReady) return;
-    if (saveTimer.current) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(async () => {
-      try {
-        setStatus("Salvando online...");
-        await saveRemoteState(userId, state);
-        setLastSavedAt(formatSaveTime());
-        setSaveError(null);
-        setStatus("Online Supabase");
-      } catch (error) {
-          console.error(error);
-          setSaveError("Erro ao salvar online. Dados podem estar apenas neste navegador.");
-          setStatus("Erro ao salvar online");
-      }
-    }, 700);
-  }, [state, userId]);
+  }, [state]);
 
-  const updateState = (updater: (prev: FinanceState) => FinanceState) =>
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges) return;
+
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [hasUnsavedChanges]);
+
+  const updateState = (updater: (prev: FinanceState) => FinanceState) => {
+    setHasUnsavedChanges(true);
     setState((prev) => normalizeState(updater(prev)));
+  };
 
   const setSelectedMonth = (month: string) => {
     updateState((prev) => ({
@@ -223,7 +231,8 @@ export function App() {
   const importBackup = async (file: File) => {
     const text = await file.text();
     setState(normalizeState(JSON.parse(text)));
-    setStatus("Backup importado");
+    setHasUnsavedChanges(true);
+    setStatus("Backup importado · alterações não salvas");
   };
 
   const handleSaveProfile = async () => {
@@ -239,13 +248,54 @@ export function App() {
     }
   };
 
+  const handleSaveAll = async () => {
+    if (!userId || !supabase || saving) return;
+
+    const invalidTransactions = state.transactions.filter(
+      (t) => !/^\d{4}-\d{2}-\d{2}$/.test(t.date || "")
+    );
+
+    if (invalidTransactions.length > 0) {
+      setSaveError(
+        `Existem ${invalidTransactions.length} lançamento(s) sem data válida. Corrija antes de salvar.`
+      );
+      setStatus("Erro de validação");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setStatus("Salvando online...");
+      setSaveError(null);
+
+      await saveRemoteState(userId, state);
+
+      setHasUnsavedChanges(false);
+      setLastSavedAt(formatSaveTime());
+      setStatus("Online Supabase");
+    } catch (error) {
+      console.error(error);
+      setSaveError("Erro ao salvar online. O rascunho continua salvo neste navegador.");
+      setStatus("Erro ao salvar online");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const syncStatus = saveError
     ? saveError
-    : `${status}${email ? ` · ${email}` : ""}${lastSavedAt ? ` · último salvamento: ${lastSavedAt}` : ""}`;
+    : `${status}${email ? ` · ${email}` : ""}${
+        hasUnsavedChanges
+          ? " · alterações não salvas"
+          : lastSavedAt
+            ? ` · último salvamento: ${lastSavedAt}`
+            : ""
+      }`;
 
   if (isSupabaseConfigured && !userId) {
     return <AuthScreen />;
   }
+      
 
   return (
     <div className="app-shell">
@@ -293,24 +343,39 @@ export function App() {
             <h1>{navItems.find((item) => item.id === activePage)?.label}</h1>
             <p>{syncStatus}</p>
           </div>
-          <div className="topbar-actions">
-            <label className="field compact">
-              <span>Mês</span>
-              <input
-                type="month"
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-              />
-            </label>
-            {userId && (
-              <button
-                className="secondary"
-                onClick={() => supabase?.auth.signOut()}
-              >
-                <LogOut size={16} /> Sair
-              </button>
-            )}
-          </div>
+        <div className="topbar-actions">
+          <label className="field compact">
+            <span>Mês</span>
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+            />
+          </label>
+
+          {userId && (
+            <button
+              className={hasUnsavedChanges ? "primary" : "secondary"}
+              onClick={handleSaveAll}
+              disabled={!hasUnsavedChanges || saving}
+            >
+              {saving
+                ? "Salvando..."
+                : hasUnsavedChanges
+                  ? "Salvar alterações"
+                  : "Tudo salvo"}
+            </button>
+          )}
+
+          {userId && (
+            <button
+              className="secondary"
+              onClick={() => supabase?.auth.signOut()}
+            >
+              <LogOut size={16} /> Sair
+            </button>
+          )}
+        </div>
         </header>
 
         {activePage === "dashboard" && (
@@ -745,8 +810,13 @@ function TransactionsPage({
                 <td>
                   <input
                     type="date"
-                    value={t.date}
-                    onChange={(e) => patch(t.id, { date: e.target.value })}
+                    required
+                    value={t.date || todayISO()}
+                    onChange={(e) => {
+                      const nextDate = e.target.value;
+                      if (!nextDate) return;
+                      patch(t.id, { date: nextDate });
+                    }}
                   />
                 </td>
                 <td>
@@ -847,10 +917,22 @@ function ImportPage({ state, updateState }: PageProps) {
   };
   const apply = () => {
     if (!result) return;
+
+    const validTransactions = result.transactions.filter((t) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(t.date || "")
+    );
+
+    if (validTransactions.length !== result.transactions.length) {
+      alert(
+        "Alguns lançamentos foram ignorados porque estavam sem data válida."
+      );
+    }
+
     updateState((prev) => ({
       ...prev,
-      transactions: [...result.transactions, ...prev.transactions],
+      transactions: [...validTransactions, ...prev.transactions],
     }));
+
     setResult(null);
   };
 
