@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AreaChart,
@@ -111,9 +111,8 @@ export function App() {
   const [profileMessage, setProfileMessage] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
-  const [, setRemoteReady] = useState(!isSupabaseConfigured);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [remoteReady, setRemoteReady] = useState(!isSupabaseConfigured);
+  const saveTimer = useRef<number | null>(null);
 
   const selectedMonth = state.settings.selectedMonth || currentMonth();
 
@@ -126,7 +125,6 @@ export function App() {
         setRemoteReady(false);
         setStatus("Carregando dados online...");
         const remote = await loadRemoteState(session.user.id);
-        setHasUnsavedChanges(false);
         setLastSavedAt(null);
         setSaveError(null);
         const profile = await loadProfile(session.user.id);
@@ -155,7 +153,6 @@ export function App() {
           setRemoteReady(false);
           setStatus("Carregando dados online...");
           const remote = await loadRemoteState(session.user.id);
-          setHasUnsavedChanges(false);
           setLastSavedAt(null);
           setSaveError(null);
           const profile = await loadProfile(session.user.id);
@@ -167,7 +164,6 @@ export function App() {
           setUserId(session.user.id);
           setEmail(session.user.email || null);
           setRemoteReady(true);
-          setStatus("Dados online sincronizados");
           } else {
             setRemoteReady(false);
             setUserId(null);
@@ -187,27 +183,50 @@ export function App() {
 
   useEffect(() => {
     saveLocalState(state);
-  }, [state]);
 
-  useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!hasUnsavedChanges) return;
+    if (!supabase || !userId || !remoteReady) return;
 
-      event.preventDefault();
-      event.returnValue = "";
-    };
+    const invalidTransactions = state.transactions.filter(
+      (t) => !/^\d{4}-\d{2}-\d{2}$/.test(t.date || "")
+    );
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    if (invalidTransactions.length > 0) {
+      setSaveError(
+        `Existem ${invalidTransactions.length} lançamento(s) sem data válida. Corrija antes de salvar online.`
+      );
+      setStatus("Erro de validação");
+      return;
+    }
+
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+    }
+
+    saveTimer.current = window.setTimeout(async () => {
+      try {
+        setStatus("Salvando online...");
+        setSaveError(null);
+
+        await saveRemoteState(userId, state);
+
+        setLastSavedAt(formatSaveTime());
+        setStatus("Online Supabase");
+      } catch (error) {
+        console.error(error);
+        setSaveError("Erro ao salvar online. Backup local mantido neste navegador.");
+        setStatus("Erro ao salvar online");
+      }
+    }, 800);
 
     return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+      }
     };
-  }, [hasUnsavedChanges]);
+  }, [state, userId, remoteReady]);
 
-  const updateState = (updater: (prev: FinanceState) => FinanceState) => {
-    setHasUnsavedChanges(true);
+  const updateState = (updater: (prev: FinanceState) => FinanceState) =>
     setState((prev) => normalizeState(updater(prev)));
-  };
 
   const setSelectedMonth = (month: string) => {
     updateState((prev) => ({
@@ -231,8 +250,7 @@ export function App() {
   const importBackup = async (file: File) => {
     const text = await file.text();
     setState(normalizeState(JSON.parse(text)));
-    setHasUnsavedChanges(true);
-    setStatus("Backup importado · alterações não salvas");
+    setStatus("Backup importado. Salvando online...");
   };
 
   const handleSaveProfile = async () => {
@@ -248,55 +266,13 @@ export function App() {
     }
   };
 
-  const handleSaveAll = async () => {
-    if (!userId || !supabase || saving) return;
-
-    const invalidTransactions = state.transactions.filter(
-      (t) => !/^\d{4}-\d{2}-\d{2}$/.test(t.date || "")
-    );
-
-    if (invalidTransactions.length > 0) {
-      setSaveError(
-        `Existem ${invalidTransactions.length} lançamento(s) sem data válida. Corrija antes de salvar.`
-      );
-      setStatus("Erro de validação");
-      return;
-    }
-
-    try {
-      setSaving(true);
-      setStatus("Salvando online...");
-      setSaveError(null);
-
-      await saveRemoteState(userId, state);
-
-      setHasUnsavedChanges(false);
-      setLastSavedAt(formatSaveTime());
-      setStatus("Online Supabase");
-    } catch (error) {
-      console.error(error);
-      setSaveError("Erro ao salvar online. O rascunho continua salvo neste navegador.");
-      setStatus("Erro ao salvar online");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const syncStatus = saveError
     ? saveError
-    : `${status}${email ? ` · ${email}` : ""}${
-        hasUnsavedChanges
-          ? " · alterações não salvas"
-          : lastSavedAt
-            ? ` · último salvamento: ${lastSavedAt}`
-            : ""
-      }`;
-
-  if (isSupabaseConfigured && !userId) {
-    return <AuthScreen />;
-  }
+    : `${status}${email ? ` · ${email}` : ""}${lastSavedAt ? ` · último salvamento: ${lastSavedAt}` : ""}`;
+    if (isSupabaseConfigured && !userId) {
+      return <AuthScreen />;
+    }
       
-
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -352,20 +328,6 @@ export function App() {
               onChange={(e) => setSelectedMonth(e.target.value)}
             />
           </label>
-
-          {userId && (
-            <button
-              className={hasUnsavedChanges ? "primary" : "secondary"}
-              onClick={handleSaveAll}
-              disabled={!hasUnsavedChanges || saving}
-            >
-              {saving
-                ? "Salvando..."
-                : hasUnsavedChanges
-                  ? "Salvar alterações"
-                  : "Tudo salvo"}
-            </button>
-          )}
 
           {userId && (
             <button
