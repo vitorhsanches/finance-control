@@ -325,7 +325,13 @@ function TransactionsPage({ state, updateState, month }: PageProps & { month: st
         <td><input value={t.description} onChange={(e) => patch(t.id, { description: e.target.value })} /></td>
         <td><select value={t.type} onChange={(e) => patch(t.id, { type: e.target.value as Transaction['type'] })}><option value="expense">Despesa</option><option value="income">Receita</option></select></td>
         <td><select value={t.category} onChange={(e) => patch(t.id, { category: e.target.value })}>{categories.map((c) => <option key={c}>{c}</option>)}</select></td>
-        <td><input className="money-input" type="number" value={t.amount} onChange={(e) => patch(t.id, { amount: toNumber(e.target.value) })} /></td>
+        <td>
+          <MoneyInput
+            className="money-input"
+            value={t.amount}
+            onChange={(value) => patch(t.id, { amount: value })}
+          />
+        </td>
         <td><select value={t.paymentMethod} onChange={(e) => patch(t.id, { paymentMethod: e.target.value })}>{state.settings.paymentMethods.map((p) => <option key={p}>{p}</option>)}</select></td>
         <td><select value={t.accountOrCard} onChange={(e) => patch(t.id, { accountOrCard: e.target.value })}>{[...state.settings.accounts, ...state.settings.cards].map((a) => <option key={a}>{a}</option>)}</select></td>
         <td><input type="checkbox" checked={t.paid} onChange={(e) => patch(t.id, { paid: e.target.checked })} /></td>
@@ -532,6 +538,55 @@ function SettingsPage({ state, updateState }: PageProps) {
 
 interface PageProps { state: FinanceState; updateState: (updater: (prev: FinanceState) => FinanceState) => void; }
 
+function MoneyInput({
+  value,
+  onChange,
+  className
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  className?: string;
+}) {
+  const [draft, setDraft] = useState(value ? String(value).replace('.', ',') : '');
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) {
+      setDraft(value ? String(value).replace('.', ',') : '');
+    }
+  }, [value, focused]);
+
+  const commit = () => {
+    const parsed = toNumber(draft);
+    onChange(parsed);
+    setDraft(parsed ? String(parsed).replace('.', ',') : '');
+    setFocused(false);
+  };
+
+  return (
+    <input
+      className={className}
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setDraft(raw);
+
+        if (!raw.endsWith('.') && !raw.endsWith(',')) {
+          onChange(toNumber(raw));
+        }
+      }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
 function MetricCard({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' | 'warn' | 'neutral' }) { return <div className={`metric ${tone || 'neutral'}`}><span>{label}</span><strong>{value}</strong></div>; }
 function Panel({ title, action, children }: { title: string; action?: JSX.Element; children: ReactNode }) { return <section className="panel"><div className="panel-head"><h2>{title}</h2>{action}</div>{children}</section>; }
 function Empty({ message }: { message: string }) { return <div className="empty">{message}</div>; }
