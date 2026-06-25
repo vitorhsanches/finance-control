@@ -17,11 +17,40 @@ export function currentMonth() {
 export function toNumber(value: unknown): number {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
   if (value === null || value === undefined || value === '') return 0;
-  const normalized = String(value).trim().replace(/\./g, '').replace(',', '.').replace(/[^0-9.-]/g, '');
-  const parsed = Number(normalized);
+
+  let text = String(value)
+    .trim()
+    .replace(/\s/g, '')
+    .replace('R$', '')
+    .replace(/[^\d,.-]/g, '');
+
+  if (!text) return 0;
+
+  const hasComma = text.includes(',');
+  const hasDot = text.includes('.');
+
+  if (hasComma && hasDot) {
+    const lastComma = text.lastIndexOf(',');
+    const lastDot = text.lastIndexOf('.');
+
+    if (lastComma > lastDot) {
+      // BR: 1.234,56
+      text = text.replace(/\./g, '').replace(',', '.');
+    } else {
+      // EN: 1,234.56
+      text = text.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    // BR simples: 10,50
+    text = text.replace(',', '.');
+  } else {
+    // EN simples: 10.50
+    text = text;
+  }
+
+  const parsed = Number(text);
   return Number.isFinite(parsed) ? parsed : 0;
 }
-
 export function money(value: number, state?: FinanceState) {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',

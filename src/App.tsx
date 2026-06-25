@@ -407,10 +407,109 @@ function BillsPage({ state, updateState, month }: PageProps & { month: string })
 }
 
 function InvestmentsPage({ state, updateState }: PageProps) {
-  const add = () => updateState((prev) => ({ ...prev, investments: [{ id: uid('iv'), type: 'Renda fixa', institution: '', initialAmount: 0, currentAmount: 0, liquidity: '', goal: '' }, ...prev.investments] }));
-  const patch = (id: string, patch: Partial<Investment>) => updateState((prev) => ({ ...prev, investments: prev.investments.map((i) => i.id === id ? { ...i, ...patch } : i) }));
-  const remove = (id: string) => updateState((prev) => ({ ...prev, investments: prev.investments.filter((i) => i.id !== id) }));
-  return <Panel title="Investimentos" action={<button className="primary" onClick={add}><Plus size={16} /> Adicionar</button>}><div className="table-wrap"><table><thead><tr><th>Tipo</th><th>Instituição</th><th>Aplicado</th><th>Atual</th><th>Lucro/prejuízo</th><th>Liquidez</th><th>Objetivo</th><th></th></tr></thead><tbody>{state.investments.map((i) => <tr key={i.id}><td><input value={i.type} onChange={(e) => patch(i.id, { type: e.target.value })} /></td><td><input value={i.institution} onChange={(e) => patch(i.id, { institution: e.target.value })} /></td><td><input type="number" value={i.initialAmount} onChange={(e) => patch(i.id, { initialAmount: toNumber(e.target.value) })} /></td><td><input type="number" value={i.currentAmount} onChange={(e) => patch(i.id, { currentAmount: toNumber(e.target.value) })} /></td><td>{money(i.currentAmount - i.initialAmount, state)}</td><td><input value={i.liquidity} onChange={(e) => patch(i.id, { liquidity: e.target.value })} /></td><td><input value={i.goal} onChange={(e) => patch(i.id, { goal: e.target.value })} /></td><td><button className="icon danger" onClick={() => remove(i.id)}><Trash2 size={15} /></button></td></tr>)}</tbody></table></div></Panel>;
+  const add = () =>
+    updateState((prev) => ({
+      ...prev,
+      investments: [
+        {
+          id: uid('iv'),
+          type: 'Renda fixa',
+          institution: '',
+          initialAmount: 0,
+          currentAmount: 0,
+          liquidity: '',
+          goal: ''
+        },
+        ...prev.investments
+      ]
+    }));
+
+  const patch = (id: string, patch: Partial<Investment>) =>
+    updateState((prev) => ({
+      ...prev,
+      investments: prev.investments.map((i) => (i.id === id ? { ...i, ...patch } : i))
+    }));
+
+  const remove = (id: string) =>
+    updateState((prev) => ({
+      ...prev,
+      investments: prev.investments.filter((i) => i.id !== id)
+    }));
+
+  return (
+    <Panel title="Investimentos" action={<button className="primary" onClick={add}><Plus size={16} /> Adicionar</button>}>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Tipo</th>
+              <th>Instituição</th>
+              <th>Aplicado</th>
+              <th>Atual</th>
+              <th>Lucro/prejuízo</th>
+              <th>Liquidez</th>
+              <th>Objetivo</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {state.investments.map((i) => {
+              const profitLoss = i.currentAmount - i.initialAmount;
+
+              return (
+                <tr key={i.id}>
+                  <td>
+                    <input value={i.type} onChange={(e) => patch(i.id, { type: e.target.value })} />
+                  </td>
+                  <td>
+                    <input value={i.institution} onChange={(e) => patch(i.id, { institution: e.target.value })} />
+                  </td>
+                  <td>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={i.initialAmount}
+                      onChange={(e) => {
+                        const nextInitial = toNumber(e.target.value);
+
+                        patch(i.id, {
+                          initialAmount: nextInitial,
+                          currentAmount:
+                            i.currentAmount === 0 || i.currentAmount === i.initialAmount
+                              ? nextInitial
+                              : i.currentAmount
+                        });
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={i.currentAmount}
+                      onChange={(e) => patch(i.id, { currentAmount: toNumber(e.target.value) })}
+                    />
+                  </td>
+                  <td>{money(profitLoss, state)}</td>
+                  <td>
+                    <input value={i.liquidity} onChange={(e) => patch(i.id, { liquidity: e.target.value })} />
+                  </td>
+                  <td>
+                    <input value={i.goal} onChange={(e) => patch(i.id, { goal: e.target.value })} />
+                  </td>
+                  <td>
+                    <button className="icon danger" onClick={() => remove(i.id)}>
+                      <Trash2 size={15} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
 }
 
 function BudgetsPage({ state, updateState, month }: PageProps & { month: string }) {
