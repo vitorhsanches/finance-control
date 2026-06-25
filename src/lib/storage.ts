@@ -152,6 +152,8 @@ export async function saveRemoteState(userId: string, state: FinanceState) {
   if (!supabase) return;
   const normalized = normalizeState(state);
 
+  await preventUnsafeEmptyOverwrite(userId, normalized);
+
   await throwIfError(supabase.from('profiles').upsert({ user_id: userId, updated_at: new Date().toISOString() }));
 
   await throwIfError(supabase.from('app_settings').upsert({
@@ -164,6 +166,55 @@ export async function saveRemoteState(userId: string, state: FinanceState) {
     emergency_contribution: normalized.settings.emergencyContribution,
     updated_at: new Date().toISOString()
   }));
+
+  function isFinancialStateEmpty(state: FinanceState) {
+    return (
+      state.transactions.length === 0 &&
+      state.installments.length === 0 &&
+      state.bills.length === 0 &&
+      state.investments.length === 0 &&
+      state.budgets.length === 0
+    );
+  }
+
+  async function getExistingFinancialRows(userId: string) {
+    if (!supabase) return 0;
+
+    const tables = [
+      'transactions',
+      'installments',
+      'future_bills',
+      'investments',
+      'budgets'
+    ];
+
+    const counts = await Promise.all(
+      tables.map(async (tableName) => {
+        const { count, error } = await supabase
+          .from(tableName)
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', userId);
+
+        if (error) throw error;
+
+        return count || 0;
+      })
+    );
+
+    return counts.reduce((total, count) => total + count, 0);
+  }
+
+  async function preventUnsafeEmptyOverwrite(userId: string, state: FinanceState) {
+    if (!isFinancialStateEmpty(state)) return;
+
+    const existingRows = await getExistingFinancialRows(userId);
+
+    if (existingRows > 0) {
+      throw new Error(
+        'Salvamento bloqueado: o app tentou salvar um estado financeiro vazio sobre dados existentes.'
+      );
+    }
+  }
 
   await replaceRows('categories', userId, [
     ...normalized.settings.categories.map((name, index) => ({ user_id: userId, kind: 'expense', name, sort_order: index })),
@@ -350,6 +401,7 @@ function rowToInvestment(row: any): Investment {
     notes: row.notes || ''
   };
 }
+
 function investmentToRow(userId: string, item: Investment) {
   return {
     user_id: userId,
