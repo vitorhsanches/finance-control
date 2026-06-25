@@ -30,6 +30,34 @@ export async function getSession(): Promise<Session | null> {
   return data.session;
 }
 
+export async function loadProfile(userId: string): Promise<{ displayName: string }> {
+  if (!supabase) return { displayName: '' };
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('display_name')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  return {
+    displayName: data?.display_name || ''
+  };
+}
+
+export async function saveProfile(userId: string, displayName: string) {
+  if (!supabase) return;
+
+  await throwIfError(
+    supabase.from('profiles').upsert({
+      user_id: userId,
+      display_name: displayName.trim() || null,
+      updated_at: new Date().toISOString()
+    })
+  );
+}
+
 export async function loadRemoteState(userId: string): Promise<FinanceState> {
   if (!supabase) return loadLocalState();
 

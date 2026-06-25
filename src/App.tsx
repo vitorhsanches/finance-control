@@ -54,6 +54,8 @@ import {
   saveRemoteState,
   supabase,
   isSupabaseConfigured,
+  loadProfile,
+  saveProfile,
 } from "./lib/storage";
 import {
   addMonths,
@@ -102,6 +104,11 @@ export function App() {
   const [state, setState] = useState<FinanceState>(() => loadLocalState());
   const [activePage, setActivePage] = useState<PageKey>("dashboard");
   const [status, setStatus] = useState("Modo local");
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [displayNameDraft, setDisplayNameDraft] = useState("");
+  const [profileMessage, setProfileMessage] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [remoteReady, setRemoteReady] = useState(!isSupabaseConfigured);
@@ -118,33 +125,55 @@ export function App() {
         setRemoteReady(false);
         setStatus("Carregando dados online...");
         const remote = await loadRemoteState(session.user.id);
+        const profile = await loadProfile(session.user.id);
+        setDisplayName(profile.displayName);
+        setDisplayNameDraft(profile.displayName);
+        setSaveError(null);
+        setStatus("Online Supabase");
         setState(remote);
         setUserId(session.user.id);
         setEmail(session.user.email || null);
         setRemoteReady(true);
         setStatus("Dados online sincronizados");
-      } else {
-        setRemoteReady(false);
-        setState(emptyState());
-        setStatus("Aguardando login");
-      }
+        } else {
+          setRemoteReady(false);
+          setUserId(null);
+          setEmail(null);
+          setDisplayName("");
+          setDisplayNameDraft("");
+          setProfileMessage("");
+          setLastSavedAt(null);
+          setSaveError(null);
+          setState(emptyState());
+          setStatus("Aguardando login");
+        }
       supabase.auth.onAuthStateChange(async (_event, session) => {
         if (session?.user?.id) {
           setRemoteReady(false);
           setStatus("Carregando dados online...");
           const remote = await loadRemoteState(session.user.id);
+          const profile = await loadProfile(session.user.id);
+          setDisplayName(profile.displayName);
+          setDisplayNameDraft(profile.displayName);
+          setSaveError(null);
+          setStatus("Online Supabase");
           setState(remote);
           setUserId(session.user.id);
           setEmail(session.user.email || null);
           setRemoteReady(true);
           setStatus("Dados online sincronizados");
-        } else {
-          setRemoteReady(false);
-          setUserId(null);
-          setEmail(null);
-          setState(emptyState());
-          setStatus("Aguardando login");
-        }
+          } else {
+            setRemoteReady(false);
+            setUserId(null);
+            setEmail(null);
+            setDisplayName("");
+            setDisplayNameDraft("");
+            setProfileMessage("");
+            setLastSavedAt(null);
+            setSaveError(null);
+            setState(emptyState());
+            setStatus("Aguardando login");
+          }
       });
     }
     boot();
@@ -156,11 +185,15 @@ export function App() {
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(async () => {
       try {
+        setStatus("Salvando online...");
         await saveRemoteState(userId, state);
-        setStatus("Salvo online");
+        setLastSavedAt(formatSaveTime());
+        setSaveError(null);
+        setStatus("Online Supabase");
       } catch (error) {
-        console.error(error);
-        setStatus("Erro ao salvar online. Backup local mantido.");
+          console.error(error);
+          setSaveError("Erro ao salvar online. Dados podem estar apenas neste navegador.");
+          setStatus("Erro ao salvar online");
       }
     }, 700);
   }, [state, userId]);
@@ -192,6 +225,23 @@ export function App() {
     setState(normalizeState(JSON.parse(text)));
     setStatus("Backup importado");
   };
+
+  const handleSaveProfile = async () => {
+    if (!userId) return;
+
+    try {
+      await saveProfile(userId, displayNameDraft);
+      setDisplayName(displayNameDraft.trim());
+      setProfileMessage("Perfil salvo.");
+    } catch (error) {
+      console.error(error);
+      setProfileMessage("Não foi possível salvar o perfil.");
+    }
+  };
+
+  const syncStatus = saveError
+    ? saveError
+    : `${status}${email ? ` · ${email}` : ""}${lastSavedAt ? ` · último salvamento: ${lastSavedAt}` : ""}`;
 
   if (isSupabaseConfigured && !userId) {
     return <AuthScreen />;
@@ -241,10 +291,7 @@ export function App() {
         <header className="topbar">
           <div>
             <h1>{navItems.find((item) => item.id === activePage)?.label}</h1>
-            <p>
-              {status}
-              {email ? ` · ${email}` : ""}
-            </p>
+            <p>{syncStatus}</p>
           </div>
           <div className="topbar-actions">
             <label className="field compact">
@@ -267,7 +314,12 @@ export function App() {
         </header>
 
         {activePage === "dashboard" && (
-          <Dashboard state={state} month={selectedMonth} />
+          <Dashboard
+            state={state}
+            month={selectedMonth}
+            displayName={displayName}
+            email={email}
+          />
         )}
         {activePage === "transactions" && (
           <TransactionsPage
@@ -304,7 +356,15 @@ export function App() {
           />
         )}
         {activePage === "settings" && (
-          <SettingsPage state={state} updateState={updateState} />
+          <SettingsPage
+            state={state}
+            updateState={updateState}
+            email={email}
+            displayNameDraft={displayNameDraft}
+            setDisplayNameDraft={setDisplayNameDraft}
+            onSaveProfile={handleSaveProfile}
+            profileMessage={profileMessage}
+          />
         )}
       </main>
     </div>
@@ -433,7 +493,17 @@ function AuthScreen() {
   );
 }
 
-function Dashboard({ state, month }: { state: FinanceState; month: string }) {
+function Dashboard({
+  state,
+  month,
+  displayName,
+  email,
+}: {
+  state: FinanceState;
+  month: string;
+  displayName: string;
+  email: string | null;
+}) {
   const metrics = getMetrics(state, month);
   const categoryData = expensesByCategory(state, month).slice(0, 8);
   const budgetData = budgetRows(state, month);
@@ -448,8 +518,16 @@ function Dashboard({ state, month }: { state: FinanceState; month: string }) {
     };
   });
 
+const welcomeName = displayName.trim() || email?.split("@")[0] || "bem-vindo";
+
   return (
     <div className="page-stack">
+      <Panel title={`Olá, ${welcomeName} 👋`}>
+        <p className="muted">
+          Acompanhe seu mês, seus gastos, contas futuras e investimentos em um só lugar.
+        </p>
+      </Panel>
+
       <section className="cards-grid">
         <MetricCard
           label="Saldo disponível"
@@ -1458,7 +1536,21 @@ function BudgetsPage({
   );
 }
 
-function SettingsPage({ state, updateState }: PageProps) {
+function SettingsPage({
+  state,
+  updateState,
+  email,
+  displayNameDraft,
+  setDisplayNameDraft,
+  onSaveProfile,
+  profileMessage,
+}: PageProps & {
+  email: string | null;
+  displayNameDraft: string;
+  setDisplayNameDraft: (value: string) => void;
+  onSaveProfile: () => void;
+  profileMessage: string;
+}) {
   const s = state.settings;
   const setSettings = (patch: Partial<FinanceState["settings"]>) =>
     updateState((prev) => ({
@@ -1491,9 +1583,37 @@ function SettingsPage({ state, updateState }: PageProps) {
         r.cardName === cardName ? { ...r, ...patch } : r,
       ),
     });
-  return (
-    <div className="page-stack">
-      <Panel title="Configurações gerais">
+return (
+  <div className="page-stack">
+    <Panel title="Perfil">
+      <div className="form-grid">
+        <label className="field">
+          <span>Nome de exibição</span>
+          <input
+            value={displayNameDraft}
+            onChange={(e) => setDisplayNameDraft(e.target.value)}
+            placeholder="Ex: Vitor"
+          />
+        </label>
+
+        <label className="field">
+          <span>E-mail</span>
+          <input value={email || ""} disabled />
+        </label>
+      </div>
+
+      <button
+        className="primary"
+        style={{ marginTop: 12 }}
+        onClick={onSaveProfile}
+      >
+        Salvar perfil
+      </button>
+
+      {profileMessage && <div className="notice">{profileMessage}</div>}
+    </Panel>
+
+    <Panel title="Configurações gerais">
         <div className="form-grid">
           <NumberField
             label="Saldo inicial"
@@ -1754,4 +1874,10 @@ function TextArea({
       />
     </label>
   );
+}
+function formatSaveTime(date = new Date()) {
+  return date.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
