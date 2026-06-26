@@ -11,6 +11,21 @@ const MONTHS: Record<string, string> = {
   JAN: '01', FEV: '02', MAR: '03', ABR: '04', MAI: '05', JUN: '06', JUL: '07', AGO: '08', SET: '09', OUT: '10', NOV: '11', DEZ: '12'
 };
 
+const CAIXA_MONTH_WORDS: Record<string, string> = {
+  janeiro: '01',
+  fevereiro: '02',
+  marco: '03',
+  abril: '04',
+  maio: '05',
+  junho: '06',
+  julho: '07',
+  agosto: '08',
+  setembro: '09',
+  outubro: '10',
+  novembro: '11',
+  dezembro: '12'
+};
+
 function normalizeDescription(value: string) {
   return String(value || '')
     .replace(/\s+/g, ' ')
@@ -37,6 +52,35 @@ function inferPaymentMethod(description: string, fallback = 'Outros') {
   return fallback;
 }
 
+function inferCaixaPeriodType(
+  description: string,
+  source: string,
+  fallback: 'income' | 'expense'
+): 'income' | 'expense' {
+  if (source !== 'caixa-period-pdf') return fallback;
+
+  const d = slug(description);
+
+  if (
+    d.includes('pix enviado') ||
+    d.includes('debito prestacao') ||
+    d.includes('pagamento de boleto') ||
+    d.includes('pagamento de')
+  ) {
+    return 'expense';
+  }
+
+  if (
+    d.includes('pix recebido') ||
+    d.includes('recebimento ted') ||
+    d.includes('recebimento')
+  ) {
+    return 'income';
+  }
+
+  return fallback;
+}
+
 export function classifyCategory(description: string, type: 'income' | 'expense') {
   const d = slug(description);
   if (type === 'income') {
@@ -54,8 +98,10 @@ export function classifyCategory(description: string, type: 'income' | 'expense'
     [['hospital', 'farmacia', 'drogaria', 'clinica', 'saude'], 'Saúde'],
     [['faculdade', 'educacional', 'curso', 'nove de julho'], 'Educação'],
     [['ipva', 'licenciamento', 'seguro', 'multa', 'dgfin', 'diretoria geral de financas'], 'Carro'],
-    [['hotel', 'hoteleira', 'ingresso', 'tickets', 'evento', 'cinema', 'bar'], 'Lazer']
+    [['hotel', 'hoteleira', 'ingresso', 'tickets', 'evento', 'cinema', 'bar'], 'Lazer'],
+    [['prestacao hab', 'financiamento habitacional', 'habitacao', 'hab'], 'Casa'],
   ];
+
   for (const [keys, category] of rules) {
     if (keys.some((key) => d.includes(key))) return category;
   }
@@ -72,9 +118,16 @@ function makeTransaction(params: {
   accountOrCard?: string;
   fileName: string;
 }): Transaction {
-  const type = params.type || (params.amount >= 0 ? 'income' : 'expense');
-  const amount = Math.abs(toNumber(params.amount));
+  const fallbackType = params.type || (params.amount >= 0 ? 'income' : 'expense');
   const description = normalizeDescription(params.description);
+
+  const type = inferCaixaPeriodType(
+    description,
+    params.source,
+    fallbackType
+  );
+
+  const amount = Math.abs(toNumber(params.amount));
   const category = classifyCategory(description, type);
   const hash = simpleHash([params.date, description, type, amount.toFixed(2), params.source]);
   return {
@@ -256,6 +309,241 @@ function detectCsvKind(text: string) {
   return 'unknown';
 }
 
+function isCaixaPeriodPdf(text: string) {
+  const d = slug(text);
+
+  return (
+    d.includes('extrato por periodo') &&
+    d.includes('saldo do dia') &&
+    (
+      d.includes('pix enviado') ||
+      d.includes('pix recebido') ||
+      d.includes('recebimento ted') ||
+      d.includes('debito prestacao') ||
+      d.includes('pagamento de boleto')
+    )
+  );
+}
+
+function isCaixaNegativeAmount(value: string) {
+  const normalized = value
+    .replace(/\s+/g, "")
+    .replace(/[−–—]/g, "-");
+
+  return normalized.startsWith("-R$");
+}
+
+function isCaixaExpenseBlock(block: string[], amountIndex: number) {
+  const amountLine = block[amountIndex] || "";
+  const previousLine = block[amountIndex - 1] || "";
+  const combinedAroundAmount = `${previousLine}${amountLine}`;
+
+  if (isCaixaNegativeAmount(amountLine)) return true;
+  if (isCaixaNegativeAmount(combinedAroundAmount)) return true;
+
+  const description = slug(block.join(" "));
+
+  return (
+    description.includes("pix enviado") ||
+    description.includes("debito prestacao") ||
+    description.includes("pagamento de boleto") ||
+    description.includes("pagamento de")
+  );
+}
+
+function parseCaixaCurrency(value: string) {
+  const normalized = value
+    .replace(/[−–—]/g, "-")
+    .replace(/\s+/g, "");
+
+  const onlyNumber = normalized
+    .replace(/^-?R\$/, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+
+  return Number(onlyNumber);
+}
+
+function parseCaixaHeaderDate(line: string) {
+  const match = line.match(/^(\d{2})\s+de\s+([A-Za-zÀ-ÿ]+)\s+de\s+(\d{4})/i);
+  if (!match) return '';
+
+  const day = match[1];
+  const monthName = slug(match[2]);
+  const year = match[3];
+  const month = CAIXA_MONTH_WORDS[monthName];
+
+  if (!month) return '';
+
+  return `${year}-${month}-${day}`;
+}
+
+function parseCaixaShortDate(line: string, fallbackYear: string) {
+  const match = line.match(/^(\d{2})(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)$/i);
+  if (!match) return '';
+
+  const day = match[1];
+  const month = MONTHS[match[2].toUpperCase()];
+  if (!month) return '';
+
+  return `${fallbackYear}-${month}-${day}`;
+}
+
+function isCaixaUiOrSummaryLine(line: string) {
+  const d = slug(line);
+
+  return (
+    !d ||
+    d === 'ordenar' ||
+    d === 'compartilhar' ||
+    d === 'voltar' ||
+    d.startsWith('saldo do dia') ||
+    d.startsWith('saldo anterior') ||
+    d === 'extrato por periodo'
+  );
+}
+
+function isCaixaTransactionStart(line: string) {
+  return /^(Pix Enviado|Pix Recebido|Recebimento Ted|Recebimento TED|Debito Prestacao|Débito Prestação|Pagamento de|Pagamento de Boleto|TED|DOC|Transferência|Transferencia)/i.test(line);
+}
+
+function parseCaixaPeriodPdf(
+  fileName: string,
+  text: string,
+  ignored: IgnoredImportItem[],
+  state: FinanceState
+) {
+  const transactions: Transaction[] = [];
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const amountLineRegex = /^[\-−–—]?\s*R\$\s*\d{1,3}(?:\.\d{3})*,\d{2}$/;
+  const shortDateRegex = /^(\d{2})(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)$/i;
+
+  let currentDate = "";
+  let detectedYear =
+    text.match(/\bde\s+(\d{4}),/i)?.[1] ||
+    new Date().getFullYear().toString();
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    const headerDate = parseCaixaHeaderDate(line);
+
+    if (headerDate) {
+      currentDate = headerDate;
+      detectedYear = headerDate.slice(0, 4);
+      continue;
+    }
+
+    if (!isCaixaTransactionStart(line)) continue;
+
+    const block: string[] = [];
+    let j = i;
+
+    while (j < lines.length) {
+      const currentLine = lines[j];
+
+      const isNextHeader = Boolean(parseCaixaHeaderDate(currentLine));
+      const isNextTransaction = j > i && isCaixaTransactionStart(currentLine);
+      const isSummary =
+        slug(currentLine).startsWith("saldo do dia") ||
+        slug(currentLine).startsWith("saldo anterior");
+
+      if (j > i && (isNextHeader || isNextTransaction || isSummary)) {
+        break;
+      }
+
+      block.push(currentLine);
+      j += 1;
+    }
+
+    i = j - 1;
+
+    const amountIndex = block.findIndex((item) => amountLineRegex.test(item));
+    const amountLine = amountIndex >= 0 ? block[amountIndex] : "";
+
+    if (!amountLine) {
+      ignored.push({
+        fileName,
+        reason: "Não encontrei valor no lançamento Caixa.",
+        raw: block.join(" "),
+      });
+      continue;
+    }
+
+  const isExpense = isCaixaExpenseBlock(block, amountIndex);
+  const parsedAmount = parseCaixaCurrency(amountLine);
+
+    const amount = isExpense
+      ? -Math.abs(parsedAmount)
+      : Math.abs(parsedAmount);
+
+    if (!Number.isFinite(amount) || amount === 0) {
+      ignored.push({
+        fileName,
+        reason: "Valor Caixa zerado ou inválido.",
+        raw: block.join(" "),
+      });
+      continue;
+    }
+
+    const type: "income" | "expense" = isExpense ? "expense" : "income";
+
+    const shortDateLine = block.find((item) => shortDateRegex.test(item));
+
+    const date = shortDateLine
+      ? parseCaixaShortDate(shortDateLine, detectedYear)
+      : currentDate;
+
+    if (!date) {
+      ignored.push({
+        fileName,
+        reason: "Não encontrei data no lançamento Caixa.",
+        raw: block.join(" "),
+      });
+      continue;
+    }
+
+    const description = block
+      .filter((item) => !amountLineRegex.test(item))
+      .filter((item) => !shortDateRegex.test(item))
+      .filter((item) => !isCaixaUiOrSummaryLine(item))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const reason = shouldIgnore(description, amount);
+
+    if (reason) {
+      ignored.push({
+        fileName,
+        reason,
+        raw: block.join(" "),
+      });
+      continue;
+    }
+
+    transactions.push(
+      makeTransaction({
+        date,
+        description,
+        amount,
+        type,
+        source: "caixa-period-pdf",
+        paymentMethod: inferPaymentMethod(description),
+        accountOrCard: state.settings.accounts[0] || "Conta Caixa",
+        fileName,
+      })
+    );
+  }
+
+  return transactions;
+}
+
 export async function parseFinanceFiles(files: File[], state: FinanceState): Promise<ImportResult> {
   const transactions: Transaction[] = [];
   const ignored: IgnoredImportItem[] = [];
@@ -274,11 +562,17 @@ export async function parseFinanceFiles(files: File[], state: FinanceState): Pro
         if (kind === 'account') parsed = parseNubankAccountCsv(file.name, text, ignored);
         else if (kind === 'card') parsed = parseNubankCardCsv(file.name, text, ignored);
         else warnings.push(`${file.name}: CSV não reconhecido. Por enquanto o importador espera CSV Nubank de conta ou fatura.`);
-      } else if (lower.endsWith('.pdf')) {
-        const text = await extractPdfText(file);
-        if (slug(text).includes('conta') && slug(text).includes('movimentacoes')) parsed = parseNubankAccountPdf(file.name, text, ignored);
-        else warnings.push(`${file.name}: PDF não reconhecido. Nesta versão, PDF seguro é o extrato da conta Nubank.`);
-      } else {
+        } else if (lower.endsWith('.pdf')) {
+          const text = await extractPdfText(file);
+
+          if (isCaixaPeriodPdf(text)) {
+            parsed = parseCaixaPeriodPdf(file.name, text, ignored, state);
+          } else if (slug(text).includes('conta') && slug(text).includes('movimentacoes')) {
+            parsed = parseNubankAccountPdf(file.name, text, ignored);
+          } else {
+            warnings.push(`${file.name}: PDF não reconhecido. PDFs aceitos nesta versão: extrato da conta Nubank e extrato por período da Caixa.`);
+          }
+        } else {
         warnings.push(`${file.name}: formato ignorado. Use CSV ou PDF.`);
       }
 
