@@ -282,7 +282,7 @@ function ensureDate(value: unknown): string {
 function rowToTransaction(row: any): Transaction {
   return {
     id: row.id,
-    date: row.date,
+    date: ensureDate(row.date),
     description: row.description || '',
     type: row.type,
     category: row.category || '',
@@ -322,7 +322,7 @@ function transactionToRow(userId: string, item: Transaction) {
 function rowToInstallment(row: any): Installment {
   return {
     id: row.id,
-    purchaseDate: row.purchase_date,
+    purchaseDate: ensureDate(row.purchase_date),
     description: row.description || '',
     cardName: row.card_name || '',
     category: row.category || '',
@@ -338,7 +338,7 @@ function installmentToRow(userId: string, item: Installment) {
   return {
     user_id: userId,
     id: item.id,
-    purchase_date: item.purchaseDate || null,
+    purchase_date: ensureDate(item.purchaseDate),
     description: item.description || '',
     card_name: item.cardName || '',
     category: item.category || '',
@@ -354,7 +354,7 @@ function installmentToRow(userId: string, item: Installment) {
 function rowToBill(row: any): FutureBill {
   return {
     id: row.id,
-    dueDate: row.due_date,
+    dueDate: ensureDate(row.due_date),
     description: row.description || '',
     category: row.category || '',
     amount: Number(row.amount || 0),
@@ -370,7 +370,7 @@ function billToRow(userId: string, item: FutureBill) {
   return {
     user_id: userId,
     id: item.id,
-    due_date: item.dueDate || null,
+    due_date: ensureDate(item.dueDate),
     description: item.description || '',
     category: item.category || '',
     amount: item.amount || 0,

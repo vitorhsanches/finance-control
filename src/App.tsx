@@ -186,13 +186,21 @@ export function App() {
 
     if (!supabase || !userId || !remoteReady) return;
 
-    const invalidTransactions = state.transactions.filter(
-      (t) => !/^\d{4}-\d{2}-\d{2}$/.test(t.date || "")
-    );
+    const isISODate = (value?: string) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(value || "");
 
-    if (invalidTransactions.length > 0) {
+    const invalidTransactions = state.transactions.filter((t) => !isISODate(t.date));
+    const invalidInstallments = state.installments.filter((i) => !isISODate(i.purchaseDate));
+    const invalidBills = state.bills.filter((b) => !isISODate(b.dueDate));
+
+    const invalidDateCount =
+      invalidTransactions.length +
+      invalidInstallments.length +
+      invalidBills.length;
+
+    if (invalidDateCount > 0) {
       setSaveError(
-        `Existem ${invalidTransactions.length} lançamento(s) sem data válida. Corrija antes de salvar online.`
+        `Existem ${invalidDateCount} item(ns) sem data válida. Corrija antes de salvar online.`
       );
       setStatus("Erro de validação");
       return;
@@ -211,11 +219,15 @@ export function App() {
 
         setLastSavedAt(formatSaveTime());
         setStatus("Online Supabase");
-      } catch (error) {
-        console.error(error);
-        setSaveError("Erro ao salvar online. Backup local mantido neste navegador.");
-        setStatus("Erro ao salvar online");
-      }
+        } catch (error) {
+          console.error(error);
+          setSaveError(
+            error instanceof Error
+              ? error.message
+              : "Erro ao salvar online. Backup local mantido neste navegador."
+          );
+          setStatus("Erro ao salvar online");
+        }
     }, 800);
 
     return () => {
@@ -1041,17 +1053,20 @@ function InstallmentsPage({
                   <td>
                     <input
                       type="date"
-                      value={i.purchaseDate}
-                      onChange={(e) =>
+                      value={i.purchaseDate || todayISO()}
+                      onChange={(e) => {
+                        const nextDate = e.target.value;
+                        if (!nextDate) return;
+
                         patch(i.id, {
-                          purchaseDate: e.target.value,
+                          purchaseDate: nextDate,
                           firstInstallmentMonth: getFirstPaymentMonth(
                             state,
-                            e.target.value,
+                            nextDate,
                             i.cardName,
                           ),
-                        })
-                      }
+                        });
+                      }}
                     />
                   </td>
                   <td>
@@ -1218,7 +1233,7 @@ function BillsPage({
       transactions: [
         {
           id: uid("tr"),
-          date: b.dueDate,
+          date: b.dueDate || todayISO(),
           description: b.description,
           type: "expense",
           category: b.category,
@@ -1262,8 +1277,13 @@ function BillsPage({
                 <td>
                   <input
                     type="date"
-                    value={b.dueDate}
-                    onChange={(e) => patch(b.id, { dueDate: e.target.value })}
+                    value={b.dueDate || todayISO()}
+                    onChange={(e) => {
+                      const nextDate = e.target.value;
+                      if (!nextDate) return;
+
+                      patch(b.id, { dueDate: nextDate });
+                    }}
                   />
                 </td>
                 <td>
