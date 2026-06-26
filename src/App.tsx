@@ -1078,13 +1078,124 @@ function ImportPage({ state, updateState }: PageProps) {
   const [result, setResult] = useState<ImportResult | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const expenseCategories =
+    state.settings.categories.length > 0
+      ? state.settings.categories
+      : ["Outros"];
+
+  const incomeCategories =
+    state.settings.incomeCategories.length > 0
+      ? state.settings.incomeCategories
+      : ["Outros"];
+
+  const accountOptions = Array.from(
+    new Set([
+      ...state.settings.accounts,
+      ...state.settings.cards,
+      "Conta digital",
+      "Conta Caixa",
+      "Nubank",
+    ].filter(Boolean))
+  );
+
+  const paymentMethodOptions = Array.from(
+    new Set([
+      ...state.settings.paymentMethods,
+      "Pix",
+      "Débito",
+      "Crédito",
+      "Boleto",
+      "Transferência",
+      "Outros",
+    ].filter(Boolean))
+  );
+
   const parse = async (files: FileList | null) => {
     if (!files?.length) return;
+
     setLoading(true);
-    const parsed = await parseFinanceFiles([...files], state);
-    setResult(parsed);
-    setLoading(false);
+
+    try {
+      const parsed = await parseFinanceFiles([...files], state);
+      setResult(parsed);
+    } catch (error) {
+      console.error(error);
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível importar o arquivo."
+      );
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const getSourceLabel = (source?: string) => {
+    const key = (source || "").split(":")[0];
+
+    if (key === "caixa-period-pdf") return "Caixa PDF";
+    if (key === "nubank-account-pdf") return "Nubank Conta PDF";
+    if (key === "nubank-account-csv") return "Nubank Conta CSV";
+    if (key === "nubank-card-csv") return "Nubank Fatura CSV";
+
+    return key || "Arquivo";
+  };
+
+  const getCategoryOptions = (transaction: Transaction) => {
+    const base =
+      transaction.type === "income" ? incomeCategories : expenseCategories;
+
+    return Array.from(
+      new Set(
+        [...base, transaction.category]
+          .map((item) => item?.trim())
+          .filter(Boolean)
+      )
+    );
+  };
+
+  const getDefaultCategory = (type: Transaction["type"]) => {
+    if (type === "income") {
+      return incomeCategories[0] || "Outros";
+    }
+
+    return expenseCategories[0] || "Outros";
+  };
+
+  const patchPreviewTransaction = (
+    id: string,
+    patch: Partial<Transaction>
+  ) => {
+    setResult((prev) => {
+      if (!prev) return prev;
+
+      return {
+        ...prev,
+        transactions: prev.transactions.map((transaction) => {
+          if (transaction.id !== id) return transaction;
+
+          const nextType = patch.type || transaction.type;
+          const categoryOptions =
+            nextType === "income" ? incomeCategories : expenseCategories;
+
+          const currentCategory = patch.category ?? transaction.category;
+
+          const nextCategory =
+            patch.type && !categoryOptions.includes(currentCategory)
+              ? getDefaultCategory(nextType)
+              : currentCategory;
+
+          return {
+            ...transaction,
+            ...patch,
+            type: nextType,
+            category: nextCategory,
+          };
+        }),
+      };
+    });
+  };
+
   const apply = () => {
     if (!result) return;
 
@@ -1106,14 +1217,39 @@ function ImportPage({ state, updateState }: PageProps) {
     setResult(null);
   };
 
+  const clearPreview = () => {
+    setResult(null);
+  };
+
+  const importSummary = result
+    ? {
+        total: result.transactions.length,
+        incomeCount: result.transactions.filter((t) => t.type === "income")
+          .length,
+        expenseCount: result.transactions.filter((t) => t.type === "expense")
+          .length,
+        incomeTotal: result.transactions
+          .filter((t) => t.type === "income")
+          .reduce((sum, t) => sum + t.amount, 0),
+        expenseTotal: result.transactions
+          .filter((t) => t.type === "expense")
+          .reduce((sum, t) => sum + t.amount, 0),
+        ignoredCount: result.ignored.length,
+        sources: Array.from(
+          new Set(result.transactions.map((t) => getSourceLabel(t.source || "")))
+        ),
+      }
+    : null;
+
   return (
     <div className="page-stack">
       <Panel title="Importar arquivos do banco/cartão">
         <p className="muted">
-          Selecione CSV da conta Nubank, CSV da fatura Nubank ou PDF do extrato
-          da conta Nubank. O app converte direto para lançamentos e ignora
-          duplicados.
+          Selecione CSV da conta Nubank, CSV da fatura Nubank, PDF do extrato
+          da conta Nubank ou PDF do extrato por período da Caixa. O app converte
+          para lançamentos, mostra uma prévia e ignora duplicados.
         </p>
+
         <label className="dropzone">
           <FileUp />
           <strong>Selecionar arquivos</strong>
@@ -1126,15 +1262,23 @@ function ImportPage({ state, updateState }: PageProps) {
             onChange={(e) => parse(e.target.files)}
           />
         </label>
+
         {loading && <div className="notice">Convertendo arquivos...</div>}
       </Panel>
-      {result && (
+
+      {result && importSummary && (
         <Panel
           title="Prévia da importação"
           action={
-            <button className="primary" onClick={apply}>
-              Importar {result.transactions.length} lançamentos
-            </button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="secondary" onClick={clearPreview}>
+                Cancelar prévia
+              </button>
+
+              <button className="primary" onClick={apply}>
+                Importar {result.transactions.length} lançamentos
+              </button>
+            </div>
           }
         >
           {result.warnings.map((w) => (
@@ -1142,12 +1286,37 @@ function ImportPage({ state, updateState }: PageProps) {
               {w}
             </div>
           ))}
+
           <div className="summary-row">
-            <strong>{result.transactions.length}</strong>
+            <strong>{importSummary.total}</strong>
             <span>lançamentos prontos</span>
-            <strong>{result.ignored.length}</strong>
+
+            <strong>{importSummary.incomeCount}</strong>
+            <span>receitas</span>
+
+            <strong>{importSummary.expenseCount}</strong>
+            <span>despesas</span>
+
+            <strong>{importSummary.ignoredCount}</strong>
             <span>linhas ignoradas</span>
           </div>
+
+          <div className="summary-row">
+            <strong>{money(importSummary.incomeTotal, state)}</strong>
+            <span>total de receitas</span>
+
+            <strong>{money(importSummary.expenseTotal, state)}</strong>
+            <span>total de despesas</span>
+
+            <strong>{importSummary.sources.join(", ")}</strong>
+            <span>banco/origem detectado</span>
+          </div>
+
+          <p className="muted">
+            Revise os lançamentos antes de importar. Você pode ajustar tipo,
+            categoria, descrição, conta/cartão e forma de pagamento nesta prévia.
+          </p>
+
           <div className="table-wrap">
             <table>
               <thead>
@@ -1157,23 +1326,109 @@ function ImportPage({ state, updateState }: PageProps) {
                   <th>Tipo</th>
                   <th>Categoria</th>
                   <th>Valor</th>
+                  <th>Pagamento</th>
+                  <th>Conta/cartão</th>
                   <th>Origem</th>
                 </tr>
               </thead>
+
               <tbody>
                 {result.transactions.slice(0, 80).map((t) => (
                   <tr key={t.id}>
                     <td>{formatDate(t.date)}</td>
-                    <td>{t.description}</td>
-                    <td>{t.type === "income" ? "Receita" : "Despesa"}</td>
-                    <td>{t.category}</td>
+
+                    <td>
+                      <input
+                        value={t.description}
+                        onChange={(e) =>
+                          patchPreviewTransaction(t.id, {
+                            description: e.target.value,
+                          })
+                        }
+                      />
+                    </td>
+
+                    <td>
+                      <select
+                        value={t.type}
+                        onChange={(e) =>
+                          patchPreviewTransaction(t.id, {
+                            type: e.target.value as Transaction["type"],
+                          })
+                        }
+                      >
+                        <option value="income">Receita</option>
+                        <option value="expense">Despesa</option>
+                      </select>
+                    </td>
+
+                    <td>
+                      <select
+                        value={t.category}
+                        onChange={(e) =>
+                          patchPreviewTransaction(t.id, {
+                            category: e.target.value,
+                          })
+                        }
+                      >
+                        {getCategoryOptions(t).map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
                     <td>{money(t.amount, state)}</td>
+
+                    <td>
+                      <select
+                        value={t.paymentMethod || "Outros"}
+                        onChange={(e) =>
+                          patchPreviewTransaction(t.id, {
+                            paymentMethod: e.target.value,
+                          })
+                        }
+                      >
+                        {paymentMethodOptions.map((method) => (
+                          <option key={method} value={method}>
+                            {method}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    <td>
+                      <select
+                        value={t.accountOrCard || accountOptions[0] || "Conta"}
+                        onChange={(e) =>
+                          patchPreviewTransaction(t.id, {
+                            accountOrCard: e.target.value,
+                          })
+                        }
+                      >
+                        {accountOptions.map((account) => (
+                          <option key={account} value={account}>
+                            {account}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
                     <td>{t.source}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          {result.transactions.length > 80 && (
+            <div className="notice">
+              Mostrando os primeiros 80 lançamentos na prévia. Todos os{" "}
+              {result.transactions.length} lançamentos serão importados ao
+              confirmar.
+            </div>
+          )}
         </Panel>
       )}
     </div>
