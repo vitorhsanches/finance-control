@@ -186,12 +186,24 @@ export function App() {
 
     if (!supabase || !userId || !remoteReady) return;
 
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+    }
+
     const isISODate = (value?: string) =>
       /^\d{4}-\d{2}-\d{2}$/.test(value || "");
 
-    const invalidTransactions = state.transactions.filter((t) => !isISODate(t.date));
-    const invalidInstallments = state.installments.filter((i) => !isISODate(i.purchaseDate));
-    const invalidBills = state.bills.filter((b) => !isISODate(b.dueDate));
+    const invalidTransactions = state.transactions.filter(
+      (t) => !isISODate(t.date)
+    );
+
+    const invalidInstallments = state.installments.filter(
+      (i) => !isISODate(i.purchaseDate)
+    );
+
+    const invalidBills = state.bills.filter(
+      (b) => !isISODate(b.dueDate)
+    );
 
     const invalidDateCount =
       invalidTransactions.length +
@@ -206,10 +218,6 @@ export function App() {
       return;
     }
 
-    if (saveTimer.current) {
-      window.clearTimeout(saveTimer.current);
-    }
-
     saveTimer.current = window.setTimeout(async () => {
       try {
         setStatus("Salvando online...");
@@ -219,15 +227,15 @@ export function App() {
 
         setLastSavedAt(formatSaveTime());
         setStatus("Online Supabase");
-        } catch (error) {
-          console.error(error);
-          setSaveError(
-            error instanceof Error
-              ? error.message
-              : "Erro ao salvar online. Backup local mantido neste navegador."
-          );
-          setStatus("Erro ao salvar online");
-        }
+      } catch (error) {
+        console.error(error);
+        setSaveError(
+          error instanceof Error
+            ? error.message
+            : "Erro ao salvar online. Backup local mantido neste navegador."
+        );
+        setStatus("Erro ao salvar online");
+      }
     }, 800);
 
     return () => {
@@ -728,12 +736,23 @@ function TransactionsPage({
       ],
     }));
   const patch = (id: string, patch: Partial<Transaction>) =>
-    updateState((prev) => ({
-      ...prev,
-      transactions: prev.transactions.map((t) =>
-        t.id === id ? { ...t, ...patch } : t,
-      ),
-    }));
+    updateState((prev) => {
+      const nextMonth =
+        patch.date && /^\d{4}-\d{2}-\d{2}$/.test(patch.date)
+          ? ym(patch.date)
+          : prev.settings.selectedMonth;
+
+      return {
+        ...prev,
+        settings:
+          patch.date && nextMonth !== prev.settings.selectedMonth
+            ? { ...prev.settings, selectedMonth: nextMonth }
+            : prev.settings,
+        transactions: prev.transactions.map((t) =>
+          t.id === id ? { ...t, ...patch } : t,
+        ),
+      };
+    });
   const remove = (id: string) =>
     updateState((prev) => ({
       ...prev,
@@ -1217,10 +1236,23 @@ function BillsPage({
       ],
     }));
   const patch = (id: string, patch: Partial<FutureBill>) =>
-    updateState((prev) => ({
-      ...prev,
-      bills: prev.bills.map((b) => (b.id === id ? { ...b, ...patch } : b)),
-    }));
+    updateState((prev) => {
+      const nextMonth =
+        patch.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(patch.dueDate)
+          ? ym(patch.dueDate)
+          : prev.settings.selectedMonth;
+
+      return {
+        ...prev,
+        settings:
+          patch.dueDate && nextMonth !== prev.settings.selectedMonth
+            ? { ...prev.settings, selectedMonth: nextMonth }
+            : prev.settings,
+        bills: prev.bills.map((b) =>
+          b.id === id ? { ...b, ...patch } : b,
+        ),
+      };
+    });
   const remove = (id: string) =>
     updateState((prev) => ({
       ...prev,
