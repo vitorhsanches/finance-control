@@ -106,6 +106,7 @@ export function App() {
   const [status, setStatus] = useState("Modo local");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [logoutLoading, setLogoutLoading] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [displayNameDraft, setDisplayNameDraft] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
@@ -273,6 +274,66 @@ export function App() {
     setStatus("Backup importado. Salvando online...");
   };
 
+  const withTimeout = async <T,>(
+  promise: Promise<T>,
+  ms: number,
+  message: string,
+): Promise<T> => {
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      window.setTimeout(() => reject(new Error(message)), ms),
+    ),
+  ]);
+};
+
+  const handleLogout = async () => {
+    if (!supabase || logoutLoading) return;
+
+    setLogoutLoading(true);
+    setStatus("Salvando antes de sair...");
+    setSaveError(null);
+
+    try {
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+
+      if (userId && remoteReady) {
+        await withTimeout(
+          saveRemoteState(userId, state),
+          5000,
+          "Tempo limite ao salvar antes de sair. Tente novamente.",
+        );
+
+        setLastSavedAt(formatSaveTime());
+      }
+
+      setStatus("Saindo...");
+
+      await withTimeout(
+        supabase.auth.signOut(),
+        5000,
+        "Tempo limite ao sair. Recarregue a página e tente novamente.",
+      );
+
+      setLogoutLoading(false);
+      setStatus("Sessão encerrada");
+    } catch (error) {
+      console.error(error);
+
+      setSaveError(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível sair agora.",
+      );
+
+      setStatus("Erro ao sair");
+      setLogoutLoading(false);
+    }
+  };
+
   const handleSaveProfile = async () => {
     if (!userId) return;
 
@@ -297,9 +358,13 @@ export function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">FC</div>
+          <img
+            className="brand-logo"
+            src="/finasync-icon-512.png"
+            alt="FinaSync"
+          />
           <div>
-            <strong>Finance Control</strong>
+            <strong>FinaSync</strong>
             <span>{isSupabaseConfigured ? "Online" : "Local"}</span>
           </div>
         </div>
@@ -352,9 +417,10 @@ export function App() {
           {userId && (
             <button
               className="secondary"
-              onClick={() => supabase?.auth.signOut()}
+              onClick={handleLogout}
+              disabled={logoutLoading}
             >
-              <LogOut size={16} /> Sair
+              <LogOut size={16} /> {logoutLoading ? "Saindo..." : "Sair"}
             </button>
           )}
         </div>
@@ -499,12 +565,19 @@ function AuthScreen() {
   return (
     <div className="auth-screen">
       <div className="auth-card">
-        <div className="brand center">
-          <div className="brand-mark">FC</div>
-          <strong>Finance Control</strong>
+        <div className="auth-brand">
+          <img
+            className="auth-logo"
+            src="/finasync-icon-512.png"
+            alt="FinaSync"
+          />
+          <strong>FinaSync</strong>
         </div>
+
         <h1>{mode === "login" ? "Entrar" : "Criar conta"}</h1>
+
         <p>Seus dados financeiros ficam separados por usuário no Supabase.</p>
+
         <label className="field">
           <span>E-mail</span>
           <input
@@ -513,6 +586,7 @@ function AuthScreen() {
             onKeyDown={(e) => e.key === "Enter" && submit()}
           />
         </label>
+
         <label className="field">
           <span>Senha</span>
           <input
@@ -522,9 +596,11 @@ function AuthScreen() {
             onKeyDown={(e) => e.key === "Enter" && submit()}
           />
         </label>
+
         <button className="primary full" onClick={submit} disabled={loading}>
           {loading ? "Aguarde..." : mode === "login" ? "Entrar" : "Criar conta"}
         </button>
+
         <button
           className="link-button"
           onClick={() => {
@@ -534,6 +610,7 @@ function AuthScreen() {
         >
           {mode === "login" ? "Criar uma nova conta" : "Já tenho conta"}
         </button>
+
         {message && <div className="notice">{message}</div>}
       </div>
     </div>
@@ -712,10 +789,51 @@ function TransactionsPage({
     .filter((t) => ym(t.date) === month)
     .filter((t) => category === "Todos" || t.category === category)
     .filter((t) => type === "Todos" || t.type === type);
-  const categories = [
-    ...state.settings.incomeCategories,
-    ...state.settings.categories,
+  const fallbackExpenseCategories = [
+    "Alimentação",
+    "Transporte",
+    "Casa",
+    "Compras",
+    "Saúde",
+    "Educação",
+    "Lazer",
+    "Outros",
   ];
+
+  const fallbackIncomeCategories = [
+    "Salário",
+    "Freelance",
+    "Investimentos",
+    "Outras receitas",
+  ];
+
+  const expenseCategories =
+    state.settings.categories.length > 0
+      ? state.settings.categories
+      : fallbackExpenseCategories;
+
+  const incomeCategories =
+    state.settings.incomeCategories.length > 0
+      ? state.settings.incomeCategories
+      : fallbackIncomeCategories;
+
+  const categories = [
+    ...incomeCategories,
+    ...expenseCategories,
+  ];
+
+  const getTransactionCategoryOptions = (transaction: Transaction) => {
+    const baseOptions =
+      transaction.type === "income" ? incomeCategories : expenseCategories;
+
+    return Array.from(
+      new Set(
+        [...baseOptions, transaction.category]
+          .map((item) => item?.trim())
+          .filter(Boolean),
+      ),
+    );
+  };
 
   const add = () =>
     updateState((prev) => ({
@@ -726,7 +844,7 @@ function TransactionsPage({
           date: month === currentMonth() ? todayISO() : `${month}-01`,
           description: "Novo lançamento",
           type: "expense",
-          category: "Outros",
+          category: prev.settings.categories[0] || "Outros",
           amount: 0,
           paymentMethod: "Pix",
           accountOrCard: prev.settings.accounts[0] || "Conta",
@@ -877,8 +995,10 @@ function TransactionsPage({
                     value={t.category}
                     onChange={(e) => patch(t.id, { category: e.target.value })}
                   >
-                    {categories.map((c) => (
-                      <option key={c}>{c}</option>
+                    {getTransactionCategoryOptions(t).map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
                     ))}
                   </select>
                 </td>

@@ -73,7 +73,7 @@ export async function loadRemoteState(userId: string): Promise<FinanceState> {
 
   if (!settingsRow) {
     const migrated = await tryLoadLegacyFinanceState(userId);
-    const initial = migrated || emptyState();
+    const initial = withDefaultCatalogs(migrated || emptyState());
     await saveRemoteState(userId, initial);
     return initial;
   }
@@ -117,6 +117,36 @@ export async function loadRemoteState(userId: string): Promise<FinanceState> {
 
   if (errors.length) throw errors[0];
 
+const defaultSettings = sampleState().settings;
+
+const expenseCategories = (categoriesRes.data || [])
+  .filter((row) => row.kind === 'expense')
+  .map((row) => row.name)
+  .filter(Boolean);
+
+const incomeCategories = (categoriesRes.data || [])
+  .filter((row) => row.kind === 'income')
+  .map((row) => row.name)
+  .filter(Boolean);
+
+const accounts = (accountsRes.data || [])
+  .map((row) => row.name)
+  .filter(Boolean);
+
+const cards = (cardsRes.data || [])
+  .map((row) => row.name)
+  .filter(Boolean);
+
+const paymentMethods = (paymentMethodsRes.data || [])
+  .map((row) => row.name)
+  .filter(Boolean);
+
+const cardRules = (cardRulesRes.data || []).map((row): CardRule => ({
+  cardName: row.card_name,
+  closingDay: Number(row.closing_day || 1),
+  dueDay: Number(row.due_day || 1)
+}));
+
   const settings: Settings = {
     currency: settingsRow.currency || 'BRL',
     selectedMonth: settingsRow.selected_month,
@@ -124,16 +154,30 @@ export async function loadRemoteState(userId: string): Promise<FinanceState> {
     monthlyIncomeEstimate: Number(settingsRow.monthly_income_estimate || 0),
     monthlySavingGoal: Number(settingsRow.monthly_saving_goal || 0),
     emergencyContribution: Number(settingsRow.emergency_contribution || 0),
-    categories: (categoriesRes.data || []).filter((row) => row.kind === 'expense').map((row) => row.name),
-    incomeCategories: (categoriesRes.data || []).filter((row) => row.kind === 'income').map((row) => row.name),
-    accounts: (accountsRes.data || []).map((row) => row.name),
-    cards: (cardsRes.data || []).map((row) => row.name),
-    paymentMethods: (paymentMethodsRes.data || []).map((row) => row.name),
-    cardRules: (cardRulesRes.data || []).map((row): CardRule => ({
-      cardName: row.card_name,
-      closingDay: Number(row.closing_day || 1),
-      dueDay: Number(row.due_day || 1)
-    }))
+
+    categories: expenseCategories.length > 0
+      ? expenseCategories
+      : defaultSettings.categories,
+
+    incomeCategories: incomeCategories.length > 0
+      ? incomeCategories
+      : defaultSettings.incomeCategories,
+
+    accounts: accounts.length > 0
+      ? accounts
+      : defaultSettings.accounts,
+
+    cards: cards.length > 0
+      ? cards
+      : defaultSettings.cards,
+
+    paymentMethods: paymentMethods.length > 0
+      ? paymentMethods
+      : defaultSettings.paymentMethods,
+
+    cardRules: cardRules.length > 0
+      ? cardRules
+      : defaultSettings.cardRules
   };
 
   const remoteState: FinanceState = {
@@ -145,7 +189,7 @@ export async function loadRemoteState(userId: string): Promise<FinanceState> {
     budgets: (budgetsRes.data || []).map(rowToBudget)
   };
 
-  return normalizeState(remoteState);
+  return withDefaultCatalogs(remoteState);
 }
 
 export async function saveRemoteState(userId: string, state: FinanceState) {
@@ -153,6 +197,7 @@ export async function saveRemoteState(userId: string, state: FinanceState) {
   const normalized = normalizeState(state);
 
   await preventUnsafeEmptyOverwrite(userId, normalized);
+  await preventUnsafeCatalogOverwrite(userId, normalized);
 
   await throwIfError(supabase.from('profiles').upsert({ user_id: userId, updated_at: new Date().toISOString() }));
 
@@ -216,6 +261,57 @@ export async function saveRemoteState(userId: string, state: FinanceState) {
     }
   }
 
+  async function preventUnsafeCatalogOverwrite(userId: string, state: FinanceState) {
+    if (!supabase) return;
+
+    const checks = [
+      {
+        tableName: 'categories',
+        label: 'categorias',
+        newCount:
+          state.settings.categories.length +
+          state.settings.incomeCategories.length
+      },
+      {
+        tableName: 'accounts',
+        label: 'contas',
+        newCount: state.settings.accounts.length
+      },
+      {
+        tableName: 'cards',
+        label: 'cartões',
+        newCount: state.settings.cards.length
+      },
+      {
+        tableName: 'payment_methods',
+        label: 'métodos de pagamento',
+        newCount: state.settings.paymentMethods.length
+      },
+      {
+        tableName: 'card_rules',
+        label: 'regras de cartão',
+        newCount: state.settings.cardRules.length
+      }
+    ];
+
+    for (const check of checks) {
+      if (check.newCount > 0) continue;
+
+      const { count, error } = await supabase
+        .from(check.tableName)
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      if ((count || 0) > 0) {
+        throw new Error(
+          `Salvamento bloqueado: o app tentou salvar ${check.label} vazias sobre dados existentes.`
+        );
+      }
+    }
+  }
+
   await replaceRows('categories', userId, [
     ...normalized.settings.categories.map((name, index) => ({ user_id: userId, kind: 'expense', name, sort_order: index })),
     ...normalized.settings.incomeCategories.map((name, index) => ({ user_id: userId, kind: 'income', name, sort_order: index }))
@@ -265,6 +361,48 @@ async function replaceRows(tableName: string, userId: string, rows: Array<Record
 async function throwIfError(request: PromiseLike<{ error: unknown }>) {
   const { error } = await request;
   if (error) throw error;
+}
+
+function withDefaultCatalogs(state: FinanceState): FinanceState {
+  const normalized = normalizeState(state);
+  const defaultSettings = sampleState().settings;
+
+  return normalizeState({
+    ...normalized,
+    settings: {
+      ...normalized.settings,
+
+      categories:
+        normalized.settings.categories.length > 0
+          ? normalized.settings.categories
+          : defaultSettings.categories,
+
+      incomeCategories:
+        normalized.settings.incomeCategories.length > 0
+          ? normalized.settings.incomeCategories
+          : defaultSettings.incomeCategories,
+
+      accounts:
+        normalized.settings.accounts.length > 0
+          ? normalized.settings.accounts
+          : defaultSettings.accounts,
+
+      cards:
+        normalized.settings.cards.length > 0
+          ? normalized.settings.cards
+          : defaultSettings.cards,
+
+      paymentMethods:
+        normalized.settings.paymentMethods.length > 0
+          ? normalized.settings.paymentMethods
+          : defaultSettings.paymentMethods,
+
+      cardRules:
+        normalized.settings.cardRules.length > 0
+          ? normalized.settings.cardRules
+          : defaultSettings.cardRules,
+    },
+  });
 }
 
 function ensureDate(value: unknown): string {
