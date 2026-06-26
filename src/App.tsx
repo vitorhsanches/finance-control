@@ -707,6 +707,7 @@ function TransactionsPage({
 }: PageProps & { month: string }) {
   const [category, setCategory] = useState("Todos");
   const [type, setType] = useState("Todos");
+  const [pendingDateChanges, setPendingDateChanges] = useState<Record<string, string>>({});
   const rows = state.transactions
     .filter((t) => ym(t.date) === month)
     .filter((t) => category === "Todos" || t.category === category)
@@ -735,24 +736,60 @@ function TransactionsPage({
         ...prev.transactions,
       ],
     }));
-  const patch = (id: string, patch: Partial<Transaction>) =>
-    updateState((prev) => {
-      const nextMonth =
-        patch.date && /^\d{4}-\d{2}-\d{2}$/.test(patch.date)
-          ? ym(patch.date)
-          : prev.settings.selectedMonth;
 
-      return {
+  const patch = (id: string, patch: Partial<Transaction>) =>
+    updateState((prev) => ({
+      ...prev,
+      transactions: prev.transactions.map((t) =>
+        t.id === id ? { ...t, ...patch } : t,
+      ),
+    }));
+
+  const changeDate = (transaction: Transaction, nextDate: string) => {
+    if (!nextDate) return;
+
+    const currentDate = transaction.date || todayISO();
+    const currentTransactionMonth = ym(currentDate);
+    const nextTransactionMonth = ym(nextDate);
+
+    if (nextTransactionMonth !== currentTransactionMonth) {
+      setPendingDateChanges((prev) => ({
         ...prev,
-        settings:
-          patch.date && nextMonth !== prev.settings.selectedMonth
-            ? { ...prev.settings, selectedMonth: nextMonth }
-            : prev.settings,
-        transactions: prev.transactions.map((t) =>
-          t.id === id ? { ...t, ...patch } : t,
-        ),
-      };
+        [transaction.id]: nextDate,
+      }));
+      return;
+    }
+
+  setPendingDateChanges((prev) => {
+    const copy = { ...prev };
+    delete copy[transaction.id];
+    return copy;
+  });
+
+  patch(transaction.id, { date: nextDate });
+};
+
+  const confirmDateChange = (transactionId: string) => {
+    const nextDate = pendingDateChanges[transactionId];
+    if (!nextDate) return;
+
+    patch(transactionId, { date: nextDate });
+
+    setPendingDateChanges((prev) => {
+      const copy = { ...prev };
+      delete copy[transactionId];
+      return copy;
     });
+  };
+
+  const cancelDateChange = (transactionId: string) => {
+    setPendingDateChanges((prev) => {
+      const copy = { ...prev };
+      delete copy[transactionId];
+      return copy;
+    });
+  };
+
   const remove = (id: string) =>
     updateState((prev) => ({
       ...prev,
@@ -804,13 +841,15 @@ function TransactionsPage({
                   <input
                     type="date"
                     required
-                    value={t.date || todayISO()}
-                    onChange={(e) => {
-                      const nextDate = e.target.value;
-                      if (!nextDate) return;
-                      patch(t.id, { date: nextDate });
-                    }}
+                    value={pendingDateChanges[t.id] || t.date || todayISO()}
+                    onChange={(e) => changeDate(t, e.target.value)}
                   />
+
+                  {pendingDateChanges[t.id] && (
+                    <div className="muted">
+                      Mudança de mês pendente
+                    </div>
+                  )}
                 </td>
                 <td>
                   <input
@@ -884,6 +923,24 @@ function TransactionsPage({
                   />
                 </td>
                 <td>
+                  {pendingDateChanges[t.id] && (
+                    <div style={{ display: "inline-flex", gap: 6, marginRight: 6 }}>
+                      <button
+                        className="secondary small"
+                        onClick={() => confirmDateChange(t.id)}
+                      >
+                        Confirmar
+                      </button>
+
+                      <button
+                        className="secondary small"
+                        onClick={() => cancelDateChange(t.id)}
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+
                   <button className="icon danger" onClick={() => remove(t.id)}>
                     <Trash2 size={15} />
                   </button>
