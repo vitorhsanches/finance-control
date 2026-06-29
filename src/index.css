@@ -532,6 +532,74 @@ input.money-input.money-negative {
   color: #64748b;
 }
 
+/* ================================
+   Investment filters and sorting
+   ================================ */
+
+.investment-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(3, minmax(150px, 0.8fr)) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.investment-controls .field {
+  margin: 0;
+}
+
+.investment-search-field {
+  min-width: 220px;
+}
+
+.investment-filter-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: end;
+  gap: 8px;
+  min-width: 120px;
+}
+
+.investment-filter-actions span {
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (max-width: 1120px) {
+  .investment-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .investment-filter-actions {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .investment-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .investment-search-field {
+    min-width: 0;
+  }
+
+  .investment-filter-actions {
+    width: 100%;
+  }
+
+  .investment-filter-actions button {
+    width: 100%;
+  }
+}
+
 @media (max-width: 640px) {
   .investment-summary-item {
     align-items: flex-start;

@@ -1945,6 +1945,100 @@ function InvestmentsPage({ state, updateState }: PageProps) {
     .sort((a, b) => getCurrentAmount(b) - getCurrentAmount(a))
     .slice(0, 5);
 
+    const [investmentSearch, setInvestmentSearch] = useState("");
+  const [investmentInstitutionFilter, setInvestmentInstitutionFilter] =
+    useState("Todas");
+  const [investmentTypeFilter, setInvestmentTypeFilter] = useState("Todos");
+  const [investmentSort, setInvestmentSort] = useState<
+    | "current-desc"
+    | "return-desc"
+    | "return-percent-desc"
+    | "institution-asc"
+    | "type-asc"
+  >("current-desc");
+
+  const getInvestmentLabel = (value: string) =>
+    value.trim() || "Não informado";
+
+  const investmentInstitutions = Array.from(
+    new Set(
+      state.investments.map((investment) =>
+        getInvestmentLabel(investment.institution || "")
+      )
+    )
+  ).sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+  const investmentTypes = Array.from(
+    new Set(
+      state.investments.map((investment) =>
+        getInvestmentLabel(investment.type || "")
+      )
+    )
+  ).sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+  const displayedInvestments = [...state.investments]
+    .filter((investment) => {
+      const query = investmentSearch.trim().toLowerCase();
+
+      if (!query) return true;
+
+      const searchableText = [
+        investment.type,
+        investment.institution,
+        investment.goal,
+        investment.liquidity,
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(query);
+    })
+    .filter((investment) => {
+      if (investmentInstitutionFilter === "Todas") return true;
+
+      return (
+        getInvestmentLabel(investment.institution || "") ===
+        investmentInstitutionFilter
+      );
+    })
+    .filter((investment) => {
+      if (investmentTypeFilter === "Todos") return true;
+
+      return getInvestmentLabel(investment.type || "") === investmentTypeFilter;
+    })
+    .sort((a, b) => {
+      if (investmentSort === "return-desc") {
+        return getReturnAmount(b) - getReturnAmount(a);
+      }
+
+      if (investmentSort === "return-percent-desc") {
+        return getReturnPercent(b) - getReturnPercent(a);
+      }
+
+      if (investmentSort === "institution-asc") {
+        return getInvestmentLabel(a.institution || "").localeCompare(
+          getInvestmentLabel(b.institution || ""),
+          "pt-BR"
+        );
+      }
+
+      if (investmentSort === "type-asc") {
+        return getInvestmentLabel(a.type || "").localeCompare(
+          getInvestmentLabel(b.type || ""),
+          "pt-BR"
+        );
+      }
+
+      return getCurrentAmount(b) - getCurrentAmount(a);
+    });
+
+  const clearInvestmentFilters = () => {
+    setInvestmentSearch("");
+    setInvestmentInstitutionFilter("Todas");
+    setInvestmentTypeFilter("Todos");
+    setInvestmentSort("current-desc");
+  };
+
   const add = () =>
     updateState((prev) => ({
       ...prev,
@@ -2013,7 +2107,7 @@ function InvestmentsPage({ state, updateState }: PageProps) {
         />
       </section>
       
-            <section className="grid-2">
+      <section className="grid-2">
         <Panel title="Por instituição">
           {investmentsByInstitution.length === 0 ? (
             <div className="empty">Nenhum investimento cadastrado.</div>
@@ -2135,7 +2229,87 @@ function InvestmentsPage({ state, updateState }: PageProps) {
           </button>
         }
       >
+        <div className="investment-controls">
+          <label className="field compact investment-search-field">
+            <span>Buscar</span>
+            <input
+              placeholder="Tipo, instituição, objetivo..."
+              value={investmentSearch}
+              onChange={(e) => setInvestmentSearch(e.target.value)}
+            />
+          </label>
+
+          <label className="field compact">
+            <span>Instituição</span>
+            <select
+              value={investmentInstitutionFilter}
+              onChange={(e) => setInvestmentInstitutionFilter(e.target.value)}
+            >
+              <option value="Todas">Todas</option>
+              {investmentInstitutions.map((institution) => (
+                <option key={institution} value={institution}>
+                  {institution}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field compact">
+            <span>Tipo</span>
+            <select
+              value={investmentTypeFilter}
+              onChange={(e) => setInvestmentTypeFilter(e.target.value)}
+            >
+              <option value="Todos">Todos</option>
+              {investmentTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field compact">
+            <span>Ordenar por</span>
+            <select
+              value={investmentSort}
+              onChange={(e) =>
+                setInvestmentSort(
+                  e.target.value as
+                    | "current-desc"
+                    | "return-desc"
+                    | "return-percent-desc"
+                    | "institution-asc"
+                    | "type-asc"
+                )
+              }
+            >
+              <option value="current-desc">Maior valor atual</option>
+              <option value="return-desc">Maior rendimento R$</option>
+              <option value="return-percent-desc">Maior rendimento %</option>
+              <option value="institution-asc">Instituição A-Z</option>
+              <option value="type-asc">Tipo A-Z</option>
+            </select>
+          </label>
+
+          <div className="investment-filter-actions">
+            <span>
+              {displayedInvestments.length} de {state.investments.length} item(ns)
+            </span>
+
+            <button
+              className="secondary small"
+              type="button"
+              onClick={clearInvestmentFilters}
+            >
+              Limpar filtros
+            </button>
+          </div>
+        </div>
+
         <div className="table-wrap">
+          <table></table>
+
           <table>
             <thead>
               <tr>
@@ -2152,7 +2326,7 @@ function InvestmentsPage({ state, updateState }: PageProps) {
             </thead>
 
             <tbody>
-              {state.investments.map((i) => {
+              {displayedInvestments.map((i) => {
                 const currentAmount = getCurrentAmount(i);
                 const returnAmount = getReturnAmount(i);
                 const returnPercent = getReturnPercent(i);
@@ -2247,11 +2421,13 @@ function InvestmentsPage({ state, updateState }: PageProps) {
                 );
               })}
 
-              {state.investments.length === 0 && (
+              {displayedInvestments.length === 0 && (
                 <tr>
                   <td colSpan={9}>
                     <div className="empty">
-                      Nenhum investimento cadastrado ainda.
+                      {state.investments.length === 0
+                        ? "Nenhum investimento cadastrado ainda."
+                        : "Nenhum investimento encontrado com os filtros atuais."}
                     </div>
                   </td>
                 </tr>
