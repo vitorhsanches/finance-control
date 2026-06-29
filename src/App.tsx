@@ -632,6 +632,7 @@ function Dashboard({
   const categoryData = expensesByCategory(state, month).slice(0, 8);
   const budgetData = budgetRows(state, month);
   const upcoming = upcomingBills(state, 7);
+  const [showDashboardDetails, setShowDashboardDetails] = useState(false);
   const evolution = Array.from({ length: 6 }, (_, i) => {
     const m = addMonths(month, i - 5);
     const mm = getMetrics(state, m);
@@ -642,7 +643,22 @@ function Dashboard({
     };
   });
 
-const welcomeName = displayName.trim() || email?.split("@")[0] || "bem-vindo";
+  const monthExpenseItems = state.transactions
+    .filter(
+      (transaction) =>
+        transaction.type === "expense" && ym(transaction.date) === month
+    )
+    .sort((a, b) => toNumber(b.amount) - toNumber(a.amount));
+
+  const monthFutureBillItems = state.bills
+    .filter((bill) => ym(bill.dueDate) === month && !bill.paid)
+    .sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""));
+
+  const monthInstallmentItems = getInstallmentsForMonth(state, month).sort(
+    (a, b) => a.dueDate.localeCompare(b.dueDate)
+  );
+
+  const welcomeName = displayName.trim() || email?.split("@")[0] || "bem-vindo";
 
   return (
     <div className="page-stack">
@@ -701,6 +717,115 @@ const welcomeName = displayName.trim() || email?.split("@")[0] || "bem-vindo";
           tone={metrics.netWorth >= 0 ? "good" : "bad"}
         />
       </section>
+
+      <div className="dashboard-details-toggle">
+        <div>
+          <strong>Quer entender os valores do mês?</strong>
+          <span>
+            Veja quais lançamentos, contas futuras e parcelas formam os números acima.
+          </span>
+        </div>
+
+        <button
+          className="secondary"
+          type="button"
+          onClick={() => setShowDashboardDetails((current) => !current)}
+        >
+          {showDashboardDetails ? "Ocultar detalhes" : "Ver detalhes"}
+        </button>
+      </div>
+
+      {showDashboardDetails && (
+        <section className="dashboard-detail-grid">
+        <Panel title="Gastos lançados">
+          <div className="dashboard-detail-summary">
+            <strong>{money(metrics.monthExpenses, state)}</strong>
+            <span>{monthExpenseItems.length} lançamento(s)</span>
+          </div>
+
+          {monthExpenseItems.length ? (
+            <div className="dashboard-detail-list">
+              {monthExpenseItems.map((transaction) => (
+                <div className="dashboard-detail-item" key={transaction.id}>
+                  <div>
+                    <strong>{transaction.description}</strong>
+                    <span>
+                      {formatDate(transaction.date)} · {transaction.category}
+                    </span>
+                  </div>
+
+                  <strong className="dashboard-detail-value bad">
+                    {money(transaction.amount, state)}
+                  </strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty message="Nenhum gasto lançado neste mês." />
+          )}
+        </Panel>
+
+        <Panel title="Contas futuras do mês">
+          <div className="dashboard-detail-summary">
+            <strong>{money(metrics.pendingBillsMonth, state)}</strong>
+            <span>{monthFutureBillItems.length} conta(s) pendente(s)</span>
+          </div>
+
+          {monthFutureBillItems.length ? (
+            <div className="dashboard-detail-list">
+              {monthFutureBillItems.map((bill) => (
+                <div className="dashboard-detail-item" key={bill.id}>
+                  <div>
+                    <strong>{bill.description}</strong>
+                    <span>
+                      {formatDate(bill.dueDate)} · {bill.category}
+                    </span>
+                  </div>
+
+                  <strong className="dashboard-detail-value warn">
+                    {money(bill.amount, state)}
+                  </strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty message="Nenhuma conta futura pendente neste mês." />
+          )}
+        </Panel>
+
+        <Panel title="Parcelas do mês">
+          <div className="dashboard-detail-summary">
+            <strong>{money(metrics.installmentsMonth, state)}</strong>
+            <span>{monthInstallmentItems.length} parcela(s)</span>
+          </div>
+
+          {monthInstallmentItems.length ? (
+            <div className="dashboard-detail-list">
+              {monthInstallmentItems.map((row) => (
+                <div
+                  className="dashboard-detail-item"
+                  key={`${row.item.id}-${row.installmentNumber}`}
+                >
+                  <div>
+                    <strong>{row.item.description}</strong>
+                    <span>
+                      Parcela {row.installmentNumber}/{row.item.installments} ·{" "}
+                      {formatDate(row.dueDate)} · {row.item.cardName}
+                    </span>
+                  </div>
+
+                  <strong className="dashboard-detail-value warn">
+                    {money(row.amount, state)}
+                  </strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty message="Nenhuma parcela prevista neste mês." />
+          )}
+        </Panel>
+      </section>
+      )}
 
       <section className="grid-2">
         <Panel title="Gastos por categoria">
@@ -1827,64 +1952,118 @@ function BillsPage({
   const markPaid = (bill: FutureBill) => {
     if (bill.paid) return;
 
-    updateState((prev) => ({
-      ...prev,
-      bills: prev.bills.map((item) => {
-        if (item.id !== bill.id) return item;
+    const isRecurringBill = bill.recurring && bill.frequency !== "Única";
+    const nextDueDate = getNextBillDueDate(bill);
 
-        if (bill.recurring && bill.frequency !== "Única") {
-          return {
-            ...item,
-            paid: false,
-            dueDate: getNextBillDueDate(bill),
-          };
-        }
+    updateState((prev) => {
+      const nextRecurringBillExists = prev.bills.some(
+        (item) =>
+          item.id !== bill.id &&
+          item.recurring &&
+          !item.paid &&
+          item.description === bill.description &&
+          item.category === bill.category &&
+          toNumber(item.amount) === toNumber(bill.amount) &&
+          item.frequency === bill.frequency &&
+          item.dueDate === nextDueDate
+      );
 
-        return {
-          ...item,
-          paid: true,
-        };
-      }),
-      transactions: [
-        {
-          id: uid("tr"),
-          date: bill.dueDate || todayISO(),
-          description: bill.description,
-          type: "expense",
-          category: bill.category,
-          amount: bill.amount,
-          paymentMethod: "Boleto",
-          accountOrCard: prev.settings.accounts[0] || "Conta",
-          essential: true,
-          paid: true,
-          source: `future-bill:${bill.id}`,
-        },
-        ...prev.transactions,
-      ],
-    }));
+      return {
+        ...prev,
+        bills: [
+          ...prev.bills.map((item) =>
+            item.id === bill.id
+              ? {
+                  ...item,
+                  paid: true,
+                }
+              : item
+          ),
+
+          ...(isRecurringBill && !nextRecurringBillExists
+            ? [
+                {
+                  ...bill,
+                  id: uid("bill"),
+                  dueDate: nextDueDate,
+                  paid: false,
+                },
+              ]
+            : []),
+        ],
+        transactions: [
+          {
+            id: uid("tr"),
+            date: bill.dueDate || todayISO(),
+            description: bill.description,
+            type: "expense",
+            category: bill.category,
+            amount: bill.amount,
+            paymentMethod: "Boleto",
+            accountOrCard: prev.settings.accounts[0] || "Conta",
+            essential: true,
+            paid: true,
+            source: `future-bill:${bill.id}`,
+          },
+          ...prev.transactions,
+        ],
+      };
+    });
   };
 
-    const unmarkPaid = (bill: FutureBill) => {
-    updateState((prev) => ({
-      ...prev,
-      bills: prev.bills.map((item) =>
-        item.id === bill.id ? { ...item, paid: false } : item
-      ),
-      transactions: prev.transactions.filter((transaction) => {
-        const linkedFutureBill =
-          transaction.source === `future-bill:${bill.id}`;
+  const unmarkPaid = (bill: FutureBill) => {
+    updateState((prev) => {
+      const nextRecurringBill = prev.bills
+        .filter(
+          (item) =>
+            item.id !== bill.id &&
+            item.recurring &&
+            !item.paid &&
+            item.description === bill.description &&
+            item.category === bill.category &&
+            toNumber(item.amount) === toNumber(bill.amount) &&
+            item.frequency === bill.frequency &&
+            (item.dueDate || "") > (bill.dueDate || "")
+        )
+        .sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""))[0];
 
-        const legacyFutureBill =
-          transaction.source === "future-bill" &&
-          transaction.type === "expense" &&
-          transaction.date === (bill.dueDate || todayISO()) &&
-          transaction.description === bill.description &&
-          transaction.category === bill.category &&
-          toNumber(transaction.amount) === toNumber(bill.amount);
+      const shouldRemoveNextRecurringBill =
+        bill.recurring &&
+        bill.frequency !== "Única" &&
+        Boolean(nextRecurringBill);
 
-        return !(linkedFutureBill || legacyFutureBill);
-      }),
-    }));
+      return {
+        ...prev,
+        bills: prev.bills
+          .filter((item) =>
+            shouldRemoveNextRecurringBill
+              ? item.id !== nextRecurringBill.id
+              : true
+          )
+          .map((item) =>
+            item.id === bill.id
+              ? {
+                  ...item,
+                  paid: false,
+                }
+              : item
+          ),
+        transactions: prev.transactions.filter((transaction) => {
+          const linkedFutureBill =
+            transaction.source === `future-bill:${bill.id}`;
+
+          const generatedFutureBillByData =
+            (transaction.source || "").startsWith("future-bill") &&
+            transaction.type === "expense" &&
+            transaction.date === (bill.dueDate || todayISO()) &&
+            transaction.description === bill.description &&
+            transaction.category === bill.category &&
+            toNumber(transaction.amount) === toNumber(bill.amount);
+
+          return !(linkedFutureBill || generatedFutureBillByData);
+        }),
+      };
+    });
   };
 
   return (
