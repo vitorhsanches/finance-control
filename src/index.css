@@ -572,6 +572,118 @@ input.money-input.money-negative {
   white-space: nowrap;
 }
 
+/* ================================
+   Future bills summary and filters
+   ================================ */
+
+.bill-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(2, minmax(150px, 0.8fr)) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.bill-controls .field {
+  margin: 0;
+}
+
+.bill-search-field {
+  min-width: 220px;
+}
+
+.bill-filter-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: end;
+  gap: 8px;
+  min-width: 120px;
+}
+
+.bill-filter-actions span {
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.bill-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 86px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.bill-status-badge.bill-status-pending {
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.bill-status-badge.bill-status-today {
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.16);
+}
+
+.bill-status-badge.bill-status-overdue {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.bill-status-badge.bill-status-paid {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.bill-row.bill-status-overdue td {
+  background: rgba(239, 68, 68, 0.035);
+}
+
+.bill-row.bill-status-today td {
+  background: rgba(245, 158, 11, 0.045);
+}
+
+.bill-row.bill-status-paid td {
+  background: rgba(16, 185, 129, 0.025);
+}
+
+@media (max-width: 1120px) {
+  .bill-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .bill-filter-actions {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .bill-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .bill-search-field {
+    min-width: 0;
+  }
+
+  .bill-filter-actions {
+    width: 100%;
+  }
+
+  .bill-filter-actions button {
+    width: 100%;
+  }
+}
+
 @media (max-width: 1120px) {
   .investment-controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
