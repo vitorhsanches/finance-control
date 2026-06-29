@@ -1890,6 +1890,61 @@ function InvestmentsPage({ state, updateState }: PageProps) {
       ? (totalReturnAmount / totalInitialAmount) * 100
       : 0;
 
+  const buildInvestmentGroup = (key: "institution" | "type") => {
+    const grouped = new Map<
+      string,
+      {
+        name: string;
+        initialAmount: number;
+        currentAmount: number;
+        count: number;
+      }
+    >();
+
+    state.investments.forEach((investment) => {
+      const name = investment[key]?.trim() || "Não informado";
+      const current = getCurrentAmount(investment);
+      const initial = investment.initialAmount || 0;
+
+      const existing = grouped.get(name) || {
+        name,
+        initialAmount: 0,
+        currentAmount: 0,
+        count: 0,
+      };
+
+      grouped.set(name, {
+        ...existing,
+        initialAmount: existing.initialAmount + initial,
+        currentAmount: existing.currentAmount + current,
+        count: existing.count + 1,
+      });
+    });
+
+    return Array.from(grouped.values())
+      .map((item) => {
+        const returnAmount = item.currentAmount - item.initialAmount;
+        const returnPercent =
+          item.initialAmount > 0
+            ? (returnAmount / item.initialAmount) * 100
+            : 0;
+
+        return {
+          ...item,
+          returnAmount,
+          returnPercent,
+        };
+      })
+      .sort((a, b) => b.currentAmount - a.currentAmount);
+  };
+
+  const investmentsByInstitution = buildInvestmentGroup("institution");
+  const investmentsByType = buildInvestmentGroup("type");
+
+  const topInvestments = [...state.investments]
+    .sort((a, b) => getCurrentAmount(b) - getCurrentAmount(a))
+    .slice(0, 5);
+
   const add = () =>
     updateState((prev) => ({
       ...prev,
@@ -1957,6 +2012,120 @@ function InvestmentsPage({ state, updateState }: PageProps) {
           tone="neutral"
         />
       </section>
+      
+            <section className="grid-2">
+        <Panel title="Por instituição">
+          {investmentsByInstitution.length === 0 ? (
+            <div className="empty">Nenhum investimento cadastrado.</div>
+          ) : (
+            <div className="investment-summary-list">
+              {investmentsByInstitution.map((item) => {
+                const returnClass =
+                  item.returnAmount > 0
+                    ? "return-positive"
+                    : item.returnAmount < 0
+                      ? "return-negative"
+                      : "return-neutral";
+
+                return (
+                  <div className="investment-summary-item" key={item.name}>
+                    <div>
+                      <strong>{item.name}</strong>
+                      <span>{item.count} investimento(s)</span>
+                    </div>
+
+                    <div className="investment-summary-values">
+                      <strong>{money(item.currentAmount, state)}</strong>
+                      <span className={returnClass}>
+                        {item.returnAmount >= 0 ? "+" : ""}
+                        {money(item.returnAmount, state)} ·{" "}
+                        {formatPercent(item.returnPercent)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Por tipo">
+          {investmentsByType.length === 0 ? (
+            <div className="empty">Nenhum investimento cadastrado.</div>
+          ) : (
+            <div className="investment-summary-list">
+              {investmentsByType.map((item) => {
+                const returnClass =
+                  item.returnAmount > 0
+                    ? "return-positive"
+                    : item.returnAmount < 0
+                      ? "return-negative"
+                      : "return-neutral";
+
+                return (
+                  <div className="investment-summary-item" key={item.name}>
+                    <div>
+                      <strong>{item.name}</strong>
+                      <span>{item.count} investimento(s)</span>
+                    </div>
+
+                    <div className="investment-summary-values">
+                      <strong>{money(item.currentAmount, state)}</strong>
+                      <span className={returnClass}>
+                        {item.returnAmount >= 0 ? "+" : ""}
+                        {money(item.returnAmount, state)} ·{" "}
+                        {formatPercent(item.returnPercent)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Panel>
+      </section>
+
+      <Panel title="Maiores posições">
+        {topInvestments.length === 0 ? (
+          <div className="empty">Nenhum investimento cadastrado.</div>
+        ) : (
+          <div className="investment-summary-list compact">
+            {topInvestments.map((investment) => {
+              const currentAmount = getCurrentAmount(investment);
+              const returnAmount = getReturnAmount(investment);
+              const returnPercent = getReturnPercent(investment);
+              const returnClass =
+                returnAmount > 0
+                  ? "return-positive"
+                  : returnAmount < 0
+                    ? "return-negative"
+                    : "return-neutral";
+
+              return (
+                <div className="investment-summary-item" key={investment.id}>
+                  <div>
+                    <strong>
+                      {investment.type || "Tipo não informado"}
+                    </strong>
+                    <span>
+                      {investment.institution || "Instituição não informada"}
+                    </span>
+                  </div>
+
+                  <div className="investment-summary-values">
+                    <strong>{money(currentAmount, state)}</strong>
+                    <span className={returnClass}>
+                      {returnAmount >= 0 ? "+" : ""}
+                      {money(returnAmount, state)} ·{" "}
+                      {formatPercent(returnPercent)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Panel>
 
       <Panel
         title="Investimentos"
