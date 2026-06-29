@@ -425,6 +425,51 @@ input.money-input.money-negative {
   font-weight: 700;
 }
 
+/* ================================
+   Investments return indicators
+   ================================ */
+
+.return-positive {
+  color: #047857;
+  font-weight: 700;
+}
+
+.return-negative {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.return-neutral {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.return-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 76px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.return-badge.return-positive {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.return-badge.return-negative {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.return-badge.return-neutral {
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.12);
+}
+
 @media (max-width: 1120px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { position: static; height: auto; }

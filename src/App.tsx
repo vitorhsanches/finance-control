@@ -1847,6 +1847,49 @@ function BillsPage({
 }
 
 function InvestmentsPage({ state, updateState }: PageProps) {
+  const getCurrentAmount = (investment: Investment) => {
+    if (investment.initialAmount > 0 && investment.currentAmount === 0) {
+      return investment.initialAmount;
+    }
+
+    return investment.currentAmount || 0;
+  };
+
+  const getReturnAmount = (investment: Investment) =>
+    getCurrentAmount(investment) - (investment.initialAmount || 0);
+
+  const getReturnPercent = (investment: Investment) => {
+    if (!investment.initialAmount || investment.initialAmount <= 0) return 0;
+
+    return (getReturnAmount(investment) / investment.initialAmount) * 100;
+  };
+
+  const formatPercent = (value: number) =>
+    `${value >= 0 ? "+" : ""}${value.toFixed(2).replace(".", ",")}%`;
+
+  const getReturnTone = (value: number) => {
+    if (value > 0) return "good";
+    if (value < 0) return "bad";
+    return "neutral";
+  };
+
+  const totalInitialAmount = state.investments.reduce(
+    (sum, investment) => sum + (investment.initialAmount || 0),
+    0
+  );
+
+  const totalCurrentAmount = state.investments.reduce(
+    (sum, investment) => sum + getCurrentAmount(investment),
+    0
+  );
+
+  const totalReturnAmount = totalCurrentAmount - totalInitialAmount;
+
+  const totalReturnPercent =
+    totalInitialAmount > 0
+      ? (totalReturnAmount / totalInitialAmount) * 100
+      : 0;
+
   const add = () =>
     updateState((prev) => ({
       ...prev,
@@ -1879,98 +1922,176 @@ function InvestmentsPage({ state, updateState }: PageProps) {
     }));
 
   return (
-    <Panel
-      title="Investimentos"
-      action={
-        <button className="primary" onClick={add}>
-          <Plus size={16} /> Adicionar
-        </button>
-      }
-    >
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Tipo</th>
-              <th>Instituição</th>
-              <th>Aplicado</th>
-              <th>Atual</th>
-              <th>Lucro/prejuízo</th>
-              <th>Liquidez</th>
-              <th>Objetivo</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {state.investments.map((i) => {
-              const profitLoss = i.currentAmount - i.initialAmount;
+    <div className="page-stack">
+      <section className="cards-grid">
+        <MetricCard
+          label="Total aplicado"
+          value={money(totalInitialAmount, state)}
+          tone="neutral"
+        />
 
-              return (
-                <tr key={i.id}>
-                  <td>
-                    <input
-                      value={i.type}
-                      onChange={(e) => patch(i.id, { type: e.target.value })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      value={i.institution}
-                      onChange={(e) =>
-                        patch(i.id, { institution: e.target.value })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <MoneyInput
-                      value={i.initialAmount}
-                      onChange={(nextInitial) => {
-                        patch(i.id, {
-                          initialAmount: nextInitial,
-                          currentAmount:
-                            i.currentAmount === 0 || i.currentAmount === i.initialAmount
-                              ? nextInitial
-                              : i.currentAmount,
-                        });
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <MoneyInput
-                      value={i.currentAmount}
-                      onChange={(value) => patch(i.id, { currentAmount: value })}
-                    />
-                  </td>
-                  <td>{money(profitLoss, state)}</td>
-                  <td>
-                    <input
-                      value={i.liquidity}
-                      onChange={(e) =>
-                        patch(i.id, { liquidity: e.target.value })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      value={i.goal}
-                      onChange={(e) => patch(i.id, { goal: e.target.value })}
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="icon danger"
-                      onClick={() => remove(i.id)}
-                    >
-                      <Trash2 size={15} />
-                    </button>
+        <MetricCard
+          label="Valor atual"
+          value={money(totalCurrentAmount, state)}
+          tone="good"
+        />
+
+        <MetricCard
+          label="Rendimento total"
+          value={`${totalReturnAmount >= 0 ? "+" : ""}${money(
+            totalReturnAmount,
+            state
+          )}`}
+          tone={getReturnTone(totalReturnAmount)}
+        />
+
+        <MetricCard
+          label="Rentabilidade total"
+          value={formatPercent(totalReturnPercent)}
+          tone={getReturnTone(totalReturnAmount)}
+        />
+
+        <MetricCard
+          label="Investimentos"
+          value={String(state.investments.length)}
+          tone="neutral"
+        />
+      </section>
+
+      <Panel
+        title="Investimentos"
+        action={
+          <button className="primary" onClick={add}>
+            <Plus size={16} /> Adicionar
+          </button>
+        }
+      >
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Instituição</th>
+                <th>Aplicado</th>
+                <th>Atual</th>
+                <th>Rendimento R$</th>
+                <th>Rendimento %</th>
+                <th>Liquidez</th>
+                <th>Objetivo</th>
+                <th></th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {state.investments.map((i) => {
+                const currentAmount = getCurrentAmount(i);
+                const returnAmount = getReturnAmount(i);
+                const returnPercent = getReturnPercent(i);
+                const returnClass =
+                  returnAmount > 0
+                    ? "return-positive"
+                    : returnAmount < 0
+                      ? "return-negative"
+                      : "return-neutral";
+
+                return (
+                  <tr key={i.id}>
+                    <td>
+                      <input
+                        value={i.type}
+                        onChange={(e) => patch(i.id, { type: e.target.value })}
+                      />
+                    </td>
+
+                    <td>
+                      <input
+                        value={i.institution}
+                        onChange={(e) =>
+                          patch(i.id, { institution: e.target.value })
+                        }
+                      />
+                    </td>
+
+                    <td>
+                      <MoneyInput
+                        className="money-input"
+                        value={i.initialAmount}
+                        onChange={(nextInitial) => {
+                          patch(i.id, {
+                            initialAmount: nextInitial,
+                            currentAmount:
+                              i.currentAmount === 0 ||
+                              i.currentAmount === i.initialAmount
+                                ? nextInitial
+                                : i.currentAmount,
+                          });
+                        }}
+                      />
+                    </td>
+
+                    <td>
+                      <MoneyInput
+                        className="money-input"
+                        value={currentAmount}
+                        onChange={(value) =>
+                          patch(i.id, { currentAmount: value })
+                        }
+                      />
+                    </td>
+
+                    <td className={returnClass}>
+                      {returnAmount >= 0 ? "+" : ""}
+                      {money(returnAmount, state)}
+                    </td>
+
+                    <td>
+                      <span className={`return-badge ${returnClass}`}>
+                        {formatPercent(returnPercent)}
+                      </span>
+                    </td>
+
+                    <td>
+                      <input
+                        value={i.liquidity}
+                        onChange={(e) =>
+                          patch(i.id, { liquidity: e.target.value })
+                        }
+                      />
+                    </td>
+
+                    <td>
+                      <input
+                        value={i.goal}
+                        onChange={(e) => patch(i.id, { goal: e.target.value })}
+                      />
+                    </td>
+
+                    <td>
+                      <button
+                        className="icon danger"
+                        onClick={() => remove(i.id)}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {state.investments.length === 0 && (
+                <tr>
+                  <td colSpan={9}>
+                    <div className="empty">
+                      Nenhum investimento cadastrado ainda.
+                    </div>
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </Panel>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
   );
 }
 
