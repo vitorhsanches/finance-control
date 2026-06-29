@@ -964,7 +964,7 @@ function TransactionsPage({
                   />
 
                   {pendingDateChanges[t.id] && (
-                    <div className="muted">
+                    <div className="muted pending-date-box">
                       Mudança de mês pendente
                     </div>
                   )}
@@ -979,6 +979,7 @@ function TransactionsPage({
                 </td>
                 <td>
                   <select
+                    className={`type-select ${t.type === "income" ? "income" : "expense"}`}
                     value={t.type}
                     onChange={(e) =>
                       patch(t.id, {
@@ -1003,11 +1004,15 @@ function TransactionsPage({
                   </select>
                 </td>
                 <td>
-                  <MoneyInput
-                    className="money-input"
-                    value={t.amount}
-                    onChange={(value) => patch(t.id, { amount: value })}
-                  />
+                  <td>
+                    <MoneyInput
+                      className={`money-input ${
+                        t.type === "income" ? "money-positive" : "money-negative"
+                      }`}
+                      value={t.amount}
+                      onChange={(value) => patch(t.id, { amount: value })}
+                    />
+                  </td>
                 </td>
                 <td>
                   <select
@@ -1044,7 +1049,7 @@ function TransactionsPage({
                 </td>
                 <td>
                   {pendingDateChanges[t.id] && (
-                    <div style={{ display: "inline-flex", gap: 6, marginRight: 6 }}>
+                    <div className="inline-button-group">
                       <button
                         className="secondary small"
                         onClick={() => confirmDateChange(t.id)}
@@ -1350,6 +1355,7 @@ function ImportPage({ state, updateState }: PageProps) {
 
                     <td>
                       <select
+                        className={`type-select ${t.type === "income" ? "income" : "expense"}`}
                         value={t.type}
                         onChange={(e) =>
                           patchPreviewTransaction(t.id, {
@@ -1379,7 +1385,9 @@ function ImportPage({ state, updateState }: PageProps) {
                       </select>
                     </td>
 
-                    <td>{money(t.amount, state)}</td>
+                    <td className={t.type === "income" ? "amount-positive" : "amount-negative"}>
+  {money(t.amount, state)}
+</td>
 
                     <td>
                       <select

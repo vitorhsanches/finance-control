@@ -162,6 +162,269 @@ td input[type="checkbox"] { width: auto; transform: scale(1.15); }
 .auth-card h1 { margin: 8px 0 0; }
 .auth-card p { color: #64748b; margin: 0; }
 
+/* ================================
+   UX POLISH - FinaSync
+   ================================ */
+
+button,
+.primary,
+.secondary,
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+button.small,
+.secondary.small {
+  min-height: 30px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+}
+
+.icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+.actions,
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.filters {
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border-radius: 14px;
+}
+
+.table-wrap table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 860px;
+}
+
+.table-wrap th,
+.table-wrap td {
+  padding: 12px 14px;
+  vertical-align: middle;
+}
+
+.table-wrap th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.table-wrap tbody tr {
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.table-wrap tbody tr:hover {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.table-wrap input,
+.table-wrap select {
+  min-height: 36px;
+}
+
+.money-input {
+  min-width: 120px;
+}
+
+.amount-positive {
+  color: #047857;
+  font-weight: 700;
+}
+
+.amount-negative {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 74px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.type-badge.income {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.type-badge.expense {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.type-select.income {
+  color: #047857;
+  font-weight: 700;
+}
+
+.type-select.expense {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.pending-date-box {
+  margin-top: 6px;
+  font-size: 0.76rem;
+}
+
+.inline-button-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+}
+
+/* Responsividade */
+@media (max-width: 900px) {
+  .app-shell {
+    display: block;
+  }
+
+  .sidebar {
+    width: 100%;
+    min-height: auto;
+    position: relative;
+  }
+
+  .main {
+    padding: 16px;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .filters,
+  .form-grid,
+  .grid-2,
+  .cards-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .panel-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .panel-head > div,
+  .panel-head .actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .summary-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 14px;
+  }
+
+  .table-wrap {
+    margin-left: -4px;
+    margin-right: -4px;
+  }
+
+  .table-wrap table {
+    min-width: 820px;
+  }
+}
+
+@media (max-width: 560px) {
+  .main {
+    padding: 12px;
+  }
+
+  .brand strong {
+    font-size: 1rem;
+  }
+
+  .topbar h1 {
+    font-size: 1.35rem;
+  }
+
+  .panel {
+    padding: 14px;
+  }
+
+  .summary-row {
+    grid-template-columns: 1fr;
+  }
+
+  button,
+  .primary,
+  .secondary {
+    min-height: 40px;
+  }
+}
+
+/* Receita / Despesa visual */
+
+.table-wrap select.type-select.income,
+select.type-select.income {
+  color: #047857 !important;
+  background: rgba(16, 185, 129, 0.10);
+  border-color: rgba(16, 185, 129, 0.35);
+  font-weight: 700;
+}
+
+.table-wrap select.type-select.expense,
+select.type-select.expense {
+  color: #b91c1c !important;
+  background: rgba(239, 68, 68, 0.10);
+  border-color: rgba(239, 68, 68, 0.35);
+  font-weight: 700;
+}
+
+.table-wrap input.money-input.money-positive,
+input.money-input.money-positive {
+  color: #047857 !important;
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.30);
+  font-weight: 700;
+}
+
+.table-wrap input.money-input.money-negative,
+input.money-input.money-negative {
+  color: #b91c1c !important;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.30);
+  font-weight: 700;
+}
+
 @media (max-width: 1120px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { position: static; height: auto; }
