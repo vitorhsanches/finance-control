@@ -1299,6 +1299,148 @@ function ImportPage({ state, updateState }: PageProps) {
     return expenseCategories[0] || "Outros";
   };
 
+    type ImportReconciliationTone = "bad" | "warn" | "neutral";
+
+  const normalizeImportMatchText = (value?: string) =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const amountMatches = (a: number, b: number, tolerance = 1) =>
+    Math.abs(toNumber(a) - toNumber(b)) <= tolerance;
+
+  const dateDiffInDays = (a?: string, b?: string) => {
+    const left = new Date(`${a || ""}T00:00:00`).getTime();
+    const right = new Date(`${b || ""}T00:00:00`).getTime();
+
+    if (Number.isNaN(left) || Number.isNaN(right)) return Number.POSITIVE_INFINITY;
+
+    return Math.abs(left - right) / (1000 * 60 * 60 * 24);
+  };
+
+  const textLooksRelated = (a?: string, b?: string) => {
+    const left = normalizeImportMatchText(a);
+    const right = normalizeImportMatchText(b);
+
+    if (!left || !right) return false;
+    if (left.includes(right) || right.includes(left)) return true;
+
+    const leftWords = left.split(" ").filter((word) => word.length >= 4);
+    const rightWords = right.split(" ").filter((word) => word.length >= 4);
+
+    return rightWords.some((word) => leftWords.includes(word));
+  };
+
+  const getImportReconciliationAlert = (
+    transaction: Transaction
+  ): {
+    tone: ImportReconciliationTone;
+    label: string;
+    description: string;
+  } => {
+    const transactionAmount = toNumber(transaction.amount);
+    const transactionDescription = transaction.description || "";
+    const transactionDate = transaction.date || todayISO();
+    const transactionMonth = ym(transactionDate);
+    const normalizedDescription =
+      normalizeImportMatchText(transactionDescription);
+
+    const duplicateTransaction = state.transactions.find(
+      (existing) =>
+        existing.type === transaction.type &&
+        existing.date === transactionDate &&
+        amountMatches(existing.amount, transactionAmount, 0.01) &&
+        textLooksRelated(existing.description, transactionDescription)
+    );
+
+    if (duplicateTransaction) {
+      return {
+        tone: "bad",
+        label: "Possível duplicado",
+        description: `Já existe em Lançamentos: ${duplicateTransaction.description}`,
+      };
+    }
+
+    const possibleFutureBill = state.bills.find(
+      (bill) =>
+        !bill.paid &&
+        transaction.type === "expense" &&
+        amountMatches(bill.amount, transactionAmount) &&
+        dateDiffInDays(bill.dueDate, transactionDate) <= 7 &&
+        (textLooksRelated(bill.description, transactionDescription) ||
+          bill.category === transaction.category)
+    );
+
+    if (possibleFutureBill) {
+      return {
+        tone: "warn",
+        label: "Possível conta futura",
+        description: `Pode ser pagamento de: ${possibleFutureBill.description}`,
+      };
+    }
+
+    const cardPaymentKeywords = [
+      "pagamento cartao",
+      "pagamento de cartao",
+      "pagamento cartão",
+      "pagamento de cartão",
+      "pagamento fatura",
+      "pagamento de fatura",
+      "fatura cartao",
+      "fatura cartão",
+      "cartoes",
+      "cartões",
+    ];
+
+    const looksLikeCardPayment =
+      transaction.type === "expense" &&
+      cardPaymentKeywords.some((keyword) =>
+        normalizedDescription.includes(normalizeImportMatchText(keyword))
+      );
+
+    const mentionsKnownCard = state.settings.cards.some((card) =>
+      normalizedDescription.includes(normalizeImportMatchText(card))
+    );
+
+    if (looksLikeCardPayment || mentionsKnownCard) {
+      return {
+        tone: "warn",
+        label: "Possível fatura",
+        description:
+          "Pode ser pagamento de cartão. Cuidado para não duplicar despesas já controladas em Cartões e parcelas.",
+      };
+    }
+
+    const possibleInstallment = getInstallmentsForMonth(
+      state,
+      transactionMonth
+    ).find(
+      (row) =>
+        transaction.type === "expense" &&
+        amountMatches(row.amount, transactionAmount) &&
+        (textLooksRelated(row.item.description, transactionDescription) ||
+          textLooksRelated(row.item.cardName, transaction.accountOrCard))
+    );
+
+    if (possibleInstallment) {
+      return {
+        tone: "warn",
+        label: "Possível parcela",
+        description: `Pode ser ${possibleInstallment.item.description} ${possibleInstallment.installmentNumber}/${possibleInstallment.item.installments}`,
+      };
+    }
+
+    return {
+      tone: "neutral",
+      label: "Novo lançamento",
+      description: "Nenhuma correspondência encontrada.",
+    };
+  };
+
   const patchPreviewTransaction = (
     id: string,
     patch: Partial<Transaction>
@@ -1333,6 +1475,19 @@ function ImportPage({ state, updateState }: PageProps) {
     });
   };
 
+  const removePreviewTransaction = (transactionId: string) => {
+    setResult((prev) =>
+      prev
+        ? {
+            ...prev,
+            transactions: prev.transactions.filter(
+              (transaction) => transaction.id !== transactionId
+            ),
+          }
+        : prev
+    );
+  };
+
   const apply = () => {
     if (!result) return;
 
@@ -1357,6 +1512,14 @@ function ImportPage({ state, updateState }: PageProps) {
   const clearPreview = () => {
     setResult(null);
   };
+
+    const reconciliationAlerts = result
+    ? result.transactions.map(getImportReconciliationAlert)
+    : [];
+
+  const importantReconciliationAlerts = reconciliationAlerts.filter(
+    (alert) => alert.tone !== "neutral"
+  ).length;
 
   const importSummary = result
     ? {
@@ -1412,7 +1575,11 @@ function ImportPage({ state, updateState }: PageProps) {
                 Cancelar prévia
               </button>
 
-              <button className="primary" onClick={apply}>
+              <button
+                className="primary"
+                onClick={apply}
+                disabled={result.transactions.length === 0}
+              >
                 Importar {result.transactions.length} lançamentos
               </button>
             </div>
@@ -1423,6 +1590,14 @@ function ImportPage({ state, updateState }: PageProps) {
               {w}
             </div>
           ))}
+
+          {importantReconciliationAlerts > 0 && (
+            <div className="notice warn">
+              Atenção: {importantReconciliationAlerts} lançamento(s) possuem
+              possível correspondência com dados já cadastrados. Revise a coluna
+              “Alerta” antes de importar.
+            </div>
+          )}
 
           <div className="summary-row">
             <strong>{importSummary.total}</strong>
@@ -1465,13 +1640,18 @@ function ImportPage({ state, updateState }: PageProps) {
                   <th>Valor</th>
                   <th>Pagamento</th>
                   <th>Conta/cartão</th>
+                  <th>Alerta</th>
+                  <th>Ações</th>
                   <th>Origem</th>
                 </tr>
               </thead>
 
               <tbody>
-                {result.transactions.slice(0, 80).map((t) => (
-                  <tr key={t.id}>
+                {result.transactions.slice(0, 80).map((t) => {
+                  const reconciliationAlert = getImportReconciliationAlert(t);
+
+                  return (
+                    <tr key={t.id}>
                     <td>{formatDate(t.date)}</td>
 
                     <td>
@@ -1516,10 +1696,15 @@ function ImportPage({ state, updateState }: PageProps) {
                         ))}
                       </select>
                     </td>
-
-                    <td className={t.type === "income" ? "amount-positive" : "amount-negative"}>
-  {money(t.amount, state)}
-</td>
+                    <td
+                      className={
+                        t.type === "income"
+                          ? "amount-positive"
+                          : "amount-negative"
+                      }
+                    >
+                      {money(t.amount, state)}
+                    </td>
 
                     <td>
                       <select
@@ -1555,9 +1740,38 @@ function ImportPage({ state, updateState }: PageProps) {
                       </select>
                     </td>
 
+                    <td>
+                      <div className={`import-alert ${reconciliationAlert.tone}`}>
+                        <strong>{reconciliationAlert.label}</strong>
+                        <span>{reconciliationAlert.description}</span>
+                      </div>
+                    </td>
+
+                    <td>
+                      <button
+                        className="secondary small"
+                        type="button"
+                        onClick={() => removePreviewTransaction(t.id)}
+                      >
+                        Remover
+                      </button>
+                    </td>
+
                     <td>{t.source}</td>
                   </tr>
-                ))}
+                  );
+                })}
+
+              {result.transactions.length === 0 && (
+                <tr>
+                  <td colSpan={10}>
+                    <div className="empty">
+                      Todas as linhas foram removidas da prévia.
+                    </div>
+                  </td>
+                </tr>
+              )}
+
               </tbody>
             </table>
           </div>

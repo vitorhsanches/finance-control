@@ -944,6 +944,50 @@ input.money-input.money-negative {
 }
 
 /* ================================
+   Import reconciliation alerts
+   ================================ */
+
+.import-alert {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 180px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: #f8fafc;
+}
+
+.import-alert strong {
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.import-alert span {
+  color: #64748b;
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+
+.import-alert.bad {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.22);
+}
+
+.import-alert.warn {
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.10);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.import-alert.neutral {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.20);
+}
+
+/* ================================
    Dashboard details toggle
    ================================ */
 
