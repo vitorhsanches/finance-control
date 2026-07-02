@@ -3743,13 +3743,56 @@ function SettingsPage({
   onSaveProfile: () => void;
   profileMessage: string;
 }) {
+
   const s = state.settings;
+
+  const [listDrafts, setListDrafts] = useState({
+    categories: s.categories.join(", "),
+    incomeCategories: s.incomeCategories.join(", "),
+    accounts: s.accounts.join(", "),
+    cards: s.cards.join(", "),
+    paymentMethods: s.paymentMethods.join(", "),
+  });
+
+  useEffect(() => {
+    setListDrafts({
+      categories: s.categories.join(", "),
+      incomeCategories: s.incomeCategories.join(", "),
+      accounts: s.accounts.join(", "),
+      cards: s.cards.join(", "),
+      paymentMethods: s.paymentMethods.join(", "),
+    });
+  }, [
+    s.categories,
+    s.incomeCategories,
+    s.accounts,
+    s.cards,
+    s.paymentMethods,
+  ]);
+
   const setSettings = (patch: Partial<FinanceState["settings"]>) =>
     updateState((prev) => ({
       ...prev,
       settings: { ...prev.settings, ...patch },
     }));
-  const setList = (
+
+  const parseListDraft = (value: string) =>
+    value
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+  const updateListDraft = (
+    key: keyof typeof listDrafts,
+    value: string,
+  ) => {
+    setListDrafts((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  const saveListDraft = (
     key: keyof Pick<
       FinanceState["settings"],
       | "categories"
@@ -3758,14 +3801,12 @@ function SettingsPage({
       | "cards"
       | "paymentMethods"
     >,
-    value: string,
-  ) =>
+  ) => {
     setSettings({
-      [key]: value
-        .split(",")
-        .map((x) => x.trim())
-        .filter(Boolean),
+      [key]: parseListDraft(listDrafts[key]),
     } as Partial<FinanceState["settings"]>);
+  };
+
   const patchCardRule = (
     cardName: string,
     patch: Partial<{ closingDay: number; dueDay: number }>,
@@ -3830,31 +3871,44 @@ return (
         </div>
       </Panel>
       <Panel title="Listas e categorias">
+        <p className="muted">
+          Separe os itens por vírgula. Exemplo: Nubank, Inter, Itaú.
+        </p>
+
         <div className="form-grid single">
           <TextArea
             label="Categorias de despesa"
-            value={s.categories.join(", ")}
-            onChange={(v) => setList("categories", v)}
+            value={listDrafts.categories}
+            onChange={(v) => updateListDraft("categories", v)}
+            onBlur={() => saveListDraft("categories")}
           />
+
           <TextArea
             label="Categorias de receita"
-            value={s.incomeCategories.join(", ")}
-            onChange={(v) => setList("incomeCategories", v)}
+            value={listDrafts.incomeCategories}
+            onChange={(v) => updateListDraft("incomeCategories", v)}
+            onBlur={() => saveListDraft("incomeCategories")}
           />
+
           <TextArea
             label="Contas"
-            value={s.accounts.join(", ")}
-            onChange={(v) => setList("accounts", v)}
+            value={listDrafts.accounts}
+            onChange={(v) => updateListDraft("accounts", v)}
+            onBlur={() => saveListDraft("accounts")}
           />
+
           <TextArea
             label="Cartões"
-            value={s.cards.join(", ")}
-            onChange={(v) => setList("cards", v)}
+            value={listDrafts.cards}
+            onChange={(v) => updateListDraft("cards", v)}
+            onBlur={() => saveListDraft("cards")}
           />
+
           <TextArea
             label="Formas de pagamento"
-            value={s.paymentMethods.join(", ")}
-            onChange={(v) => setList("paymentMethods", v)}
+            value={listDrafts.paymentMethods}
+            onChange={(v) => updateListDraft("paymentMethods", v)}
+            onBlur={() => saveListDraft("paymentMethods")}
           />
         </div>
       </Panel>
@@ -4047,14 +4101,17 @@ function NumberField({
     </label>
   );
 }
+
 function TextArea({
   label,
   value,
   onChange,
+  onBlur,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  onBlur?: () => void;
 }) {
   return (
     <label className="field">
@@ -4062,11 +4119,13 @@ function TextArea({
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         rows={3}
       />
     </label>
   );
 }
+
 function formatSaveTime(date = new Date()) {
   return date.toLocaleTimeString("pt-BR", {
     hour: "2-digit",
