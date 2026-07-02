@@ -14,19 +14,23 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+
 import {
   Download,
   FileUp,
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Menu,
   PiggyBank,
   Plus,
   Receipt,
   Settings,
   Trash2,
+  X,
   WalletCards,
 } from "lucide-react";
+
 import type {
   Budget,
   FinanceState,
@@ -103,6 +107,7 @@ const navItems: Array<{ id: PageKey; label: string; icon: JSX.Element }> = [
 export function App() {
   const [state, setState] = useState<FinanceState>(() => loadLocalState());
   const [activePage, setActivePage] = useState<PageKey>("dashboard");
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [status, setStatus] = useState("Modo local");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -356,45 +361,75 @@ export function App() {
       
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <img
-            className="brand-logo"
-            src="/finasync-icon-512.png"
-            alt="FinaSync"
-          />
-          <div>
-            <strong>FinaSync</strong>
-            <span>{isSupabaseConfigured ? "Online" : "Local"}</span>
-          </div>
-        </div>
-        <nav>
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              className={activePage === item.id ? "nav active" : "nav"}
-              onClick={() => setActivePage(item.id)}
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-actions">
-          <button className="secondary full" onClick={exportBackup}>
-            <Download size={16} /> Exportar backup
-          </button>
-          <label className="secondary full file-label">
-            <FileUp size={16} /> Importar backup
-            <input
-              hidden
-              type="file"
-              accept="application/json,.json"
-              onChange={(e) =>
-                e.target.files?.[0] && importBackup(e.target.files[0])
-              }
+      <aside className={isMobileNavOpen ? "sidebar mobile-open" : "sidebar"}>
+        <div className="sidebar-header">
+          <div className="brand">
+            <img
+              className="brand-logo"
+              src="/finasync-icon-512.png"
+              alt="FinaSync"
             />
-          </label>
+            <div>
+              <strong>FinaSync</strong>
+              <span>{isSupabaseConfigured ? "Online" : "Local"}</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="mobile-nav-toggle"
+            aria-label={isMobileNavOpen ? "Fechar menu" : "Abrir menu"}
+            aria-expanded={isMobileNavOpen}
+            onClick={() => setIsMobileNavOpen((current) => !current)}
+          >
+            {isMobileNavOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
+
+        <div className="mobile-nav-content">
+          <nav className="sidebar-nav">
+            {navItems.map((item) => (
+              <button
+                key={item.id}
+                className={activePage === item.id ? "nav active" : "nav"}
+                onClick={() => {
+                  setActivePage(item.id);
+                  setIsMobileNavOpen(false);
+                }}
+              >
+                {item.icon}
+                {item.label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="sidebar-actions">
+            <button className="secondary full" onClick={exportBackup}>
+              <Download size={16} /> Exportar backup
+            </button>
+
+            <label className="secondary full file-label">
+              <FileUp size={16} /> Importar backup
+              <input
+                hidden
+                type="file"
+                accept="application/json,.json"
+                onChange={(e) =>
+                  e.target.files?.[0] && importBackup(e.target.files[0])
+                }
+              />
+            </label>
+
+            {userId && (
+              <button
+                className="secondary full mobile-menu-logout"
+                onClick={handleLogout}
+                disabled={logoutLoading}
+              >
+                <LogOut size={16} /> {logoutLoading ? "Saindo..." : "Sair"}
+              </button>
+            )}
+          </div>
         </div>
       </aside>
 
@@ -402,7 +437,7 @@ export function App() {
         <header className="topbar">
           <div>
             <h1>{navItems.find((item) => item.id === activePage)?.label}</h1>
-            <p>{syncStatus}</p>
+            <p className="sync-status">{syncStatus}</p>
           </div>
         <div className="topbar-actions">
           <label className="field compact">
@@ -416,7 +451,7 @@ export function App() {
 
           {userId && (
             <button
-              className="secondary"
+              className="secondary mobile-topbar-logout"
               onClick={handleLogout}
               disabled={logoutLoading}
             >
@@ -662,61 +697,110 @@ function Dashboard({
 
   return (
     <div className="page-stack">
-      <Panel title={`Olá, ${welcomeName} 👋`}>
-        <p className="muted">
-          Acompanhe seu mês, seus gastos, contas futuras e investimentos em um só lugar.
-        </p>
-      </Panel>
+      <div className="mobile-hidden">
+        <Panel title={`Olá, ${welcomeName} 👋`}>
+          <p className="muted">
+            Acompanhe seu mês, seus gastos, contas futuras e investimentos em um só lugar.
+          </p>
+        </Panel>
+      </div>
+      <div className="dashboard-metrics">
+        <section className="dashboard-mobile-summary">
+          <div className="dashboard-mobile-summary-head">
+            <div>
+              <span>Resumo do mês</span>
+              <strong>{money(metrics.safeToSpend, state)}</strong>
+            </div>
 
-      <section className="cards-grid">
-        <MetricCard
-          label="Receitas do mês"
-          value={money(metrics.monthIncome, state)}
-          tone="good"
-        />
+            <span
+              className={
+                metrics.safeToSpend >= 0
+                  ? "dashboard-mobile-status good"
+                  : "dashboard-mobile-status bad"
+              }
+            >
+              {metrics.safeToSpend >= 0 ? "Livre" : "Atenção"}
+            </span>
+          </div>
 
-        <MetricCard
-          label="Gastos lançados"
-          value={money(metrics.monthExpenses, state)}
-          tone={metrics.monthExpenses > 0 ? "bad" : "neutral"}
-        />
+          <div className="dashboard-mobile-summary-grid">
+            <div>
+              <span>Receitas</span>
+              <strong className="amount-positive">
+                {money(metrics.monthIncome, state)}
+              </strong>
+            </div>
 
-        <MetricCard
-          label="Contas futuras do mês"
-          value={money(metrics.pendingBillsMonth, state)}
-          tone={metrics.pendingBillsMonth > 0 ? "warn" : "good"}
-        />
+            <div>
+              <span>Gastos</span>
+              <strong className="amount-negative">
+                {money(metrics.monthExpenses, state)}
+              </strong>
+            </div>
 
-        <MetricCard
-          label="Parcelas do mês"
-          value={money(metrics.installmentsMonth, state)}
-          tone={metrics.installmentsMonth > 0 ? "warn" : "good"}
-        />
+            <div>
+              <span>Contas futuras</span>
+              <strong>{money(metrics.pendingBillsMonth, state)}</strong>
+            </div>
 
-        <MetricCard
-          label="Previsão livre do mês"
-          value={money(metrics.safeToSpend, state)}
-          tone={metrics.safeToSpend >= 0 ? "good" : "bad"}
-        />
+            <div>
+              <span>Parcelas</span>
+              <strong>{money(metrics.installmentsMonth, state)}</strong>
+            </div>
+          </div>
+        </section>
 
-        <MetricCard
-          label="Investimentos"
-          value={money(metrics.investments, state)}
-          tone="good"
-        />
+        <section className="cards-grid dashboard-desktop-metrics">
+          <MetricCard
+            label="Receitas do mês"
+            value={money(metrics.monthIncome, state)}
+            tone="good"
+          />
 
-        <MetricCard
-          label="Parcelas abertas"
-          value={money(metrics.openInstallments, state)}
-          tone={metrics.openInstallments > 0 ? "warn" : "good"}
-        />
+          <MetricCard
+            label="Gastos lançados"
+            value={money(metrics.monthExpenses, state)}
+            tone={metrics.monthExpenses > 0 ? "bad" : "neutral"}
+          />
 
-        <MetricCard
-          label="Patrimônio líquido"
-          value={money(metrics.netWorth, state)}
-          tone={metrics.netWorth >= 0 ? "good" : "bad"}
-        />
-      </section>
+          <MetricCard
+            label="Contas futuras do mês"
+            value={money(metrics.pendingBillsMonth, state)}
+            tone={metrics.pendingBillsMonth > 0 ? "warn" : "good"}
+          />
+
+          <MetricCard
+            label="Parcelas do mês"
+            value={money(metrics.installmentsMonth, state)}
+            tone={metrics.installmentsMonth > 0 ? "warn" : "good"}
+          />
+
+          <MetricCard
+            label="Previsão livre do mês"
+            value={money(metrics.safeToSpend, state)}
+            tone={metrics.safeToSpend >= 0 ? "good" : "bad"}
+          />
+
+          <MetricCard
+            label="Investimentos"
+            value={money(metrics.investments, state)}
+            tone="good"
+          />
+
+          <MetricCard
+            label="Parcelas abertas"
+            value={money(metrics.openInstallments, state)}
+            tone={metrics.openInstallments > 0 ? "warn" : "good"}
+          />
+
+          <MetricCard
+            label="Patrimônio líquido"
+            value={money(metrics.netWorth, state)}
+            tone={metrics.netWorth >= 0 ? "good" : "bad"}
+          />
+        </section>
+      </div>
+      
 
       <div className="dashboard-details-toggle">
         <div>
