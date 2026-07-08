@@ -1235,6 +1235,67 @@ input.money-input.money-negative {
   }
 }
 
+/* ================================
+   Generic CSV import mapping
+   ================================ */
+
+.import-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.mapping-check {
+  align-content: start;
+}
+
+.checkbox-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.checkbox-line input {
+  width: auto;
+}
+
+.generic-csv-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.generic-csv-preview-table table {
+  min-width: 720px;
+}
+
+.generic-csv-preview-table td {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .import-mapping-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .generic-csv-preview-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .generic-csv-preview-actions button {
+    width: 100%;
+  }
+}
+
 @media (max-width: 380px) {
   .dashboard-mobile-summary-grid {
     grid-template-columns: 1fr;

@@ -41,7 +41,9 @@ import type {
   PageKey,
   Transaction,
 } from "./types";
+
 import { emptyState, normalizeState, sampleState } from "./data/sample";
+
 import {
   budgetRows,
   expensesByCategory,
@@ -51,6 +53,7 @@ import {
   getMetrics,
   upcomingBills,
 } from "./lib/calculations";
+
 import {
   loadLocalState,
   loadRemoteState,
@@ -61,18 +64,27 @@ import {
   loadProfile,
   saveProfile,
 } from "./lib/storage";
+
 import {
   addMonths,
   currentMonth,
   formatDate,
   money,
   parseDateToISO,
+  slug,
   toNumber,
   todayISO,
   uid,
   ym,
 } from "./lib/utils";
-import { parseFinanceFiles } from "./lib/importers";
+
+import {
+  getUnknownCsvPreviews,
+  parseFinanceFiles,
+  parseGenericCsvPreview,
+  type GenericCsvMapping,
+  type GenericCsvPreview,
+} from "./lib/importers";
 
 const COLORS = [
   "#2563eb",
@@ -1298,6 +1310,20 @@ function TransactionsPage({
 function ImportPage({ state, updateState }: PageProps) {
   const [result, setResult] = useState<ImportResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [genericCsvPreview, setGenericCsvPreview] =
+    useState<GenericCsvPreview | null>(null);
+  const [genericCsvMapping, setGenericCsvMapping] =
+    useState<GenericCsvMapping>({
+      dateColumn: "",
+      descriptionColumn: "",
+      amountColumn: "",
+      typeColumn: "",
+      accountOrCard: "",
+      paymentMethod: "Outros",
+      incomeTypeValues: "credito, crédito, receita, entrada, recebido, income, credit",
+      expenseTypeValues: "debito, débito, despesa, saida, saída, compra, expense, debit",
+      negativeMeansExpense: true,
+    });
 
   const expenseCategories =
     state.settings.categories.length > 0
@@ -1331,14 +1357,105 @@ function ImportPage({ state, updateState }: PageProps) {
     ].filter(Boolean))
   );
 
+  const findGenericColumn = (columns: string[], keywords: string[]) => {
+  return (
+    columns.find((column) => {
+      const normalizedColumn = slug(column);
+
+      return keywords.some((keyword) =>
+        normalizedColumn.includes(slug(keyword))
+      );
+    }) || ""
+  );
+};
+
+  const createDefaultGenericCsvMapping = (
+    preview: GenericCsvPreview
+  ): GenericCsvMapping => {
+    const columns = preview.columns;
+
+    return {
+      dateColumn:
+        findGenericColumn(columns, [
+          "data",
+          "date",
+          "dt",
+          "lançamento",
+          "lancamento",
+          "posted",
+        ]) ||
+        columns[0] ||
+        "",
+      descriptionColumn:
+        findGenericColumn(columns, [
+          "descrição",
+          "descricao",
+          "description",
+          "histórico",
+          "historico",
+          "memo",
+          "estabelecimento",
+          "titulo",
+          "title",
+        ]) ||
+        columns[1] ||
+        "",
+      amountColumn:
+        findGenericColumn(columns, [
+          "valor",
+          "amount",
+          "vlr",
+          "value",
+          "total",
+          "montante",
+        ]) ||
+        columns[2] ||
+        "",
+      typeColumn: findGenericColumn(columns, [
+        "tipo",
+        "type",
+        "operação",
+        "operacao",
+        "natureza",
+        "entrada",
+        "saida",
+        "saída",
+      ]),
+      accountOrCard: accountOptions[0] || "",
+      paymentMethod: paymentMethodOptions[0] || "Outros",
+      incomeTypeValues:
+        "credito, crédito, receita, entrada, recebido, income, credit",
+      expenseTypeValues:
+        "debito, débito, despesa, saida, saída, compra, expense, debit",
+      negativeMeansExpense: true,
+    };
+  };
+
+  const patchGenericCsvMapping = (patch: Partial<GenericCsvMapping>) => {
+    setGenericCsvMapping((prev) => ({
+      ...prev,
+      ...patch,
+    }));
+  };
+
   const parse = async (files: FileList | null) => {
     if (!files?.length) return;
 
     setLoading(true);
+    setGenericCsvPreview(null);
 
     try {
-      const parsed = await parseFinanceFiles([...files], state);
+      const fileArray = [...files];
+      const parsed = await parseFinanceFiles(fileArray, state);
+      const unknownCsvPreviews = await getUnknownCsvPreviews(fileArray);
+
       setResult(parsed);
+
+      if (unknownCsvPreviews.length > 0) {
+        const preview = unknownCsvPreviews[0];
+        setGenericCsvPreview(preview);
+        setGenericCsvMapping(createDefaultGenericCsvMapping(preview));
+      }
     } catch (error) {
       console.error(error);
       alert(
@@ -1358,6 +1475,7 @@ function ImportPage({ state, updateState }: PageProps) {
     if (key === "nubank-account-pdf") return "Nubank Conta PDF";
     if (key === "nubank-account-csv") return "Nubank Conta CSV";
     if (key === "nubank-card-csv") return "Nubank Fatura CSV";
+    if (key === "generic-csv") return "CSV mapeado";
 
     return key || "Arquivo";
   };
@@ -1572,6 +1690,32 @@ function ImportPage({ state, updateState }: PageProps) {
     );
   };
 
+  const applyGenericCsvMapping = () => {
+    if (!genericCsvPreview) return;
+
+    const parsed = parseGenericCsvPreview(
+      genericCsvPreview,
+      genericCsvMapping,
+      state
+    );
+
+    setResult((prev) => {
+      const current = prev || {
+        transactions: [],
+        ignored: [],
+        warnings: [],
+      };
+
+      return {
+        transactions: [...current.transactions, ...parsed.transactions],
+        ignored: [...current.ignored, ...parsed.ignored],
+        warnings: [...current.warnings, ...parsed.warnings],
+      };
+    });
+
+    setGenericCsvPreview(null);
+  };
+
   const apply = () => {
     if (!result) return;
 
@@ -1595,6 +1739,7 @@ function ImportPage({ state, updateState }: PageProps) {
 
   const clearPreview = () => {
     setResult(null);
+    setGenericCsvPreview(null);
   };
 
     const reconciliationAlerts = result
@@ -1629,9 +1774,9 @@ function ImportPage({ state, updateState }: PageProps) {
     <div className="page-stack">
       <Panel title="Importar arquivos do banco/cartão">
         <p className="muted">
-          Selecione CSV da conta Nubank, CSV da fatura Nubank, PDF do extrato
-          da conta Nubank ou PDF do extrato por período da Caixa. O app converte
-          para lançamentos, mostra uma prévia e ignora duplicados.
+          Selecione CSV ou PDF. Nubank e Caixa continuam com leitura automática.
+          Para CSVs de outros bancos, o app abrirá um mapeamento manual de colunas
+          antes de gerar a prévia.
         </p>
 
         <label className="dropzone">
@@ -1649,6 +1794,200 @@ function ImportPage({ state, updateState }: PageProps) {
 
         {loading && <div className="notice">Convertendo arquivos...</div>}
       </Panel>
+      {genericCsvPreview && (
+      <Panel
+        title={`Mapear CSV desconhecido: ${genericCsvPreview.fileName}`}
+        action={
+          <div className="generic-csv-preview-actions">
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => setGenericCsvPreview(null)}
+            >
+              Ignorar CSV
+            </button>
+
+            <button
+              className="primary"
+              type="button"
+              onClick={applyGenericCsvMapping}
+            >
+              Gerar prévia
+            </button>
+          </div>
+        }
+      >
+        <div className="notice warn">
+          Este CSV não foi reconhecido automaticamente. Escolha quais colunas
+          representam data, descrição e valor.
+        </div>
+
+        <div className="import-mapping-grid">
+          <label className="field">
+            <span>Coluna de data</span>
+            <select
+              value={genericCsvMapping.dateColumn}
+              onChange={(e) =>
+                patchGenericCsvMapping({ dateColumn: e.target.value })
+              }
+            >
+              <option value="">Selecione</option>
+              {genericCsvPreview.columns.map((column) => (
+                <option key={column} value={column}>
+                  {column}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Coluna de descrição</span>
+            <select
+              value={genericCsvMapping.descriptionColumn}
+              onChange={(e) =>
+                patchGenericCsvMapping({ descriptionColumn: e.target.value })
+              }
+            >
+              <option value="">Selecione</option>
+              {genericCsvPreview.columns.map((column) => (
+                <option key={column} value={column}>
+                  {column}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Coluna de valor</span>
+            <select
+              value={genericCsvMapping.amountColumn}
+              onChange={(e) =>
+                patchGenericCsvMapping({ amountColumn: e.target.value })
+              }
+            >
+              <option value="">Selecione</option>
+              {genericCsvPreview.columns.map((column) => (
+                <option key={column} value={column}>
+                  {column}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Coluna de tipo</span>
+            <select
+              value={genericCsvMapping.typeColumn}
+              onChange={(e) =>
+                patchGenericCsvMapping({ typeColumn: e.target.value })
+              }
+            >
+              <option value="">Não usar</option>
+              {genericCsvPreview.columns.map((column) => (
+                <option key={column} value={column}>
+                  {column}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Conta/cartão padrão</span>
+            <select
+              value={genericCsvMapping.accountOrCard}
+              onChange={(e) =>
+                patchGenericCsvMapping({ accountOrCard: e.target.value })
+              }
+            >
+              {accountOptions.map((account) => (
+                <option key={account} value={account}>
+                  {account}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Forma de pagamento padrão</span>
+            <select
+              value={genericCsvMapping.paymentMethod}
+              onChange={(e) =>
+                patchGenericCsvMapping({ paymentMethod: e.target.value })
+              }
+            >
+              {paymentMethodOptions.map((method) => (
+                <option key={method} value={method}>
+                  {method}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Textos de receita</span>
+            <input
+              value={genericCsvMapping.incomeTypeValues}
+              onChange={(e) =>
+                patchGenericCsvMapping({ incomeTypeValues: e.target.value })
+              }
+            />
+          </label>
+
+          <label className="field">
+            <span>Textos de despesa</span>
+            <input
+              value={genericCsvMapping.expenseTypeValues}
+              onChange={(e) =>
+                patchGenericCsvMapping({ expenseTypeValues: e.target.value })
+              }
+            />
+          </label>
+
+          <label className="field mapping-check">
+            <span>Regra de valor</span>
+            <label className="checkbox-line">
+              <input
+                type="checkbox"
+                checked={genericCsvMapping.negativeMeansExpense}
+                onChange={(e) =>
+                  patchGenericCsvMapping({
+                    negativeMeansExpense: e.target.checked,
+                  })
+                }
+              />
+              Valor negativo significa despesa
+            </label>
+          </label>
+        </div>
+
+        <p className="muted">
+          Prévia das primeiras linhas do arquivo. Use isso para conferir se o
+          mapeamento está correto antes de gerar os lançamentos.
+        </p>
+
+        <div className="table-wrap generic-csv-preview-table">
+          <table>
+            <thead>
+              <tr>
+                {genericCsvPreview.columns.map((column) => (
+                  <th key={column}>{column}</th>
+                ))}
+              </tr>
+            </thead>
+
+            <tbody>
+              {genericCsvPreview.sampleRows.map((row, index) => (
+                <tr key={`${genericCsvPreview.fileName}-${index}`}>
+                  {genericCsvPreview.columns.map((column) => (
+                    <td key={column}>{row[column]}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    )}
 
       {result && importSummary && (
         <Panel

@@ -5,7 +5,7 @@ import { parseDateToISO, simpleHash, slug, toNumber, uid } from './utils';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
-type CsvRow = Record<string, string>;
+export type CsvRow = Record<string, string>;
 
 const MONTHS: Record<string, string> = {
   JAN: '01', FEV: '02', MAR: '03', ABR: '04', MAI: '05', JUN: '06', JUL: '07', AGO: '08', SET: '09', OUT: '10', NOV: '11', DEZ: '12'
@@ -37,6 +37,7 @@ function shouldIgnore(description: string, amount: number) {
   const d = slug(description);
   if (d.includes('pagamento de fatura')) return 'Pagamento de fatura ignorado para evitar duplicidade com compras do cartão.';
   if (d.includes('pagamento recebido')) return 'Pagamento recebido na fatura ignorado para evitar duplicidade.';
+  if (d.includes('inclusao de pagamento') || d.includes('inclusao pagamento')) return 'Pagamento de cartão ignorado para evitar duplicidade com compras da fatura.';
   if (d.includes('aplicacao rdb') || d.includes('resgate rdb')) return 'Aplicação/resgate RDB ignorado porque é movimentação de investimento, não consumo.';
   if (d.includes('saldo inicial') || d.includes('saldo final') || d.startsWith('total de ')) return 'Linha de resumo ignorada.';
   if (!Number.isFinite(amount) || amount === 0) return 'Valor zerado ou inválido.';
@@ -149,35 +150,85 @@ function makeTransaction(params: {
 function parseCsv(text: string): CsvRow[] {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((line) => line.trim());
   if (!lines.length) return [];
-  const header = splitCsvLine(lines[0]).map((h) => h.trim());
+
+  const delimiter = detectCsvDelimiter(lines[0]);
+  const header = splitCsvLine(lines[0], delimiter).map((h) => h.trim());
+
   return lines.slice(1).map((line) => {
-    const values = splitCsvLine(line);
+    const values = splitCsvLine(line, delimiter);
     const row: CsvRow = {};
-    header.forEach((h, i) => { row[h] = values[i] ?? ''; });
+    header.forEach((h, i) => {
+      row[h] = values[i] ?? '';
+    });
     return row;
   });
 }
 
-function splitCsvLine(line: string) {
+function detectCsvDelimiter(line: string) {
+  const candidates = [',', ';', '\t'];
+  let selected = ',';
+  let selectedCount = -1;
+
+  candidates.forEach((delimiter) => {
+    const count = countDelimiterOutsideQuotes(line, delimiter);
+
+    if (count > selectedCount) {
+      selected = delimiter;
+      selectedCount = count;
+    }
+  });
+
+  return selected;
+}
+
+function countDelimiterOutsideQuotes(line: string, delimiter: string) {
+  let count = 0;
+  let quoted = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      if (quoted && line[i + 1] === '"') {
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (ch === delimiter && !quoted) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function splitCsvLine(line: string, delimiter = ',') {
   const out: string[] = [];
   let cur = '';
   let quoted = false;
+
   for (let i = 0; i < line.length; i += 1) {
     const ch = line[i];
+
     if (ch === '"') {
-      if (quoted && line[i + 1] === '"') { cur += '"'; i += 1; }
-      else quoted = !quoted;
-    } else if (ch === ',' && !quoted) {
+      if (quoted && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (ch === delimiter && !quoted) {
       out.push(cur);
       cur = '';
     } else {
       cur += ch;
     }
   }
+
   out.push(cur);
+
   return out.map((v) => v.trim());
 }
-
 function parseNubankAccountCsv(fileName: string, text: string, ignored: IgnoredImportItem[]) {
   const rows = parseCsv(text);
   const transactions: Transaction[] = [];
@@ -303,10 +354,275 @@ function parseNubankAccountPdf(fileName: string, text: string, ignored: IgnoredI
 }
 
 function detectCsvKind(text: string) {
-  const first = text.split(/\r?\n/)[0]?.toLowerCase() || '';
-  if (first.includes('data') && first.includes('valor') && first.includes('descri')) return 'account';
-  if (first.includes('date') && first.includes('title') && first.includes('amount')) return 'card';
+  const first = text.split(/\r?\n/)[0] || '';
+
+  const delimiter = detectCsvDelimiter(first);
+  const columns = splitCsvLine(first, delimiter).map((column) =>
+    slug(column)
+  );
+
+  const hasExact = (value: string) => columns.includes(value);
+
+  if (
+    hasExact('data') &&
+    hasExact('valor') &&
+    (hasExact('descricao') || hasExact('identificador'))
+  ) {
+    return 'account';
+  }
+
+  if (
+    hasExact('date') &&
+    hasExact('title') &&
+    hasExact('amount')
+  ) {
+    return 'card';
+  }
+
   return 'unknown';
+}
+
+export interface GenericCsvPreview {
+  fileName: string;
+  columns: string[];
+  rows: CsvRow[];
+  sampleRows: CsvRow[];
+}
+
+export interface GenericCsvMapping {
+  dateColumn: string;
+  descriptionColumn: string;
+  amountColumn: string;
+  typeColumn: string;
+  accountOrCard: string;
+  paymentMethod: string;
+  incomeTypeValues: string;
+  expenseTypeValues: string;
+  negativeMeansExpense: boolean;
+}
+
+function parseGenericDateToISO(value: string) {
+  const raw = String(value || '').trim();
+
+  if (!raw) return '';
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const br = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2}|\d{4})$/);
+
+  if (br) {
+    const day = br[1].padStart(2, '0');
+    const month = br[2].padStart(2, '0');
+    const year = br[3].length === 2 ? `20${br[3]}` : br[3];
+
+    const date = new Date(`${year}-${month}-${day}T00:00:00`);
+
+    if (
+      !Number.isNaN(date.getTime()) &&
+      date.getFullYear() === Number(year) &&
+      date.getMonth() + 1 === Number(month) &&
+      date.getDate() === Number(day)
+    ) {
+      return `${year}-${month}-${day}`;
+    }
+
+    return '';
+  }
+
+  const loose = new Date(raw);
+
+  if (!Number.isNaN(loose.getTime())) {
+    return `${loose.getFullYear()}-${String(loose.getMonth() + 1).padStart(2, '0')}-${String(loose.getDate()).padStart(2, '0')}`;
+  }
+
+  return '';
+}
+
+export async function getUnknownCsvPreviews(files: File[]): Promise<GenericCsvPreview[]> {
+  const previews: GenericCsvPreview[] = [];
+
+  for (const file of files) {
+    const lower = file.name.toLowerCase();
+
+    if (!lower.endsWith('.csv')) continue;
+
+    const text = await file.text();
+
+    if (detectCsvKind(text) !== 'unknown') continue;
+
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((line) => line.trim());
+
+    if (!lines.length) continue;
+
+    const delimiter = detectCsvDelimiter(lines[0]);
+    const columns = splitCsvLine(lines[0], delimiter).map((column) => column.trim()).filter(Boolean);
+    const rows = parseCsv(text).filter((row) =>
+      Object.values(row).some((value) => String(value || '').trim())
+    );
+
+    if (!columns.length || !rows.length) continue;
+
+    previews.push({
+      fileName: file.name,
+      columns,
+      rows,
+      sampleRows: rows.slice(0, 8),
+    });
+  }
+
+  return previews;
+}
+
+function splitTypeValues(value: string) {
+  return String(value || '')
+    .split(',')
+    .map((item) => slug(item))
+    .filter(Boolean);
+}
+
+function inferGenericType(
+  rawAmount: number,
+  typeText: string,
+  mapping: GenericCsvMapping
+): 'income' | 'expense' {
+  const normalizedType = slug(typeText);
+  const incomeValues = splitTypeValues(mapping.incomeTypeValues);
+  const expenseValues = splitTypeValues(mapping.expenseTypeValues);
+
+  if (
+    normalizedType &&
+    incomeValues.some((value) => normalizedType.includes(value))
+  ) {
+    return 'income';
+  }
+
+  if (
+    normalizedType &&
+    expenseValues.some((value) => normalizedType.includes(value))
+  ) {
+    return 'expense';
+  }
+
+  if (mapping.negativeMeansExpense) {
+    return rawAmount >= 0 ? 'income' : 'expense';
+  }
+
+  return 'expense';
+}
+
+export function parseGenericCsvPreview(
+  preview: GenericCsvPreview,
+  mapping: GenericCsvMapping,
+  state: FinanceState
+): ImportResult {
+  const transactions: Transaction[] = [];
+  const ignored: IgnoredImportItem[] = [];
+  const warnings: string[] = [];
+
+  if (!mapping.dateColumn || !mapping.descriptionColumn || !mapping.amountColumn) {
+    return {
+      transactions,
+      ignored,
+      warnings: [
+        `${preview.fileName}: selecione pelo menos as colunas de data, descrição e valor.`,
+      ],
+    };
+  }
+
+  const existingHashes = new Set(
+    state.transactions.map((t) => t.externalHash).filter(Boolean)
+  );
+
+  const batchHashes = new Set<string>();
+
+  preview.rows.forEach((row, index) => {
+    const rawDate = row[mapping.dateColumn] || '';
+    const rawDescription = row[mapping.descriptionColumn] || '';
+    const rawAmount = toNumber(row[mapping.amountColumn]);
+    const rawType = mapping.typeColumn ? row[mapping.typeColumn] || '' : '';
+
+    const date = parseGenericDateToISO(rawDate);
+    const description = normalizeDescription(rawDescription);
+
+    if (!date) {
+      ignored.push({
+        fileName: preview.fileName,
+        reason: `Linha ${index + 2}: data inválida.`,
+        raw: JSON.stringify(row),
+      });
+      return;
+    }
+
+    if (!description) {
+      ignored.push({
+        fileName: preview.fileName,
+        reason: `Linha ${index + 2}: descrição vazia.`,
+        raw: JSON.stringify(row),
+      });
+      return;
+    }
+
+    if (!Number.isFinite(rawAmount) || rawAmount === 0) {
+      ignored.push({
+        fileName: preview.fileName,
+        reason: `Linha ${index + 2}: valor zerado ou inválido.`,
+        raw: JSON.stringify(row),
+      });
+      return;
+    }
+
+    const type = inferGenericType(rawAmount, rawType, mapping);
+    const signedAmount =
+      type === 'expense' ? -Math.abs(rawAmount) : Math.abs(rawAmount);
+
+    const reason = shouldIgnore(description, signedAmount);
+
+    if (reason) {
+      ignored.push({
+        fileName: preview.fileName,
+        reason,
+        raw: JSON.stringify(row),
+      });
+      return;
+    }
+
+    const item = makeTransaction({
+      date,
+      description,
+      amount: signedAmount,
+      type,
+      source: 'generic-csv',
+      paymentMethod: mapping.paymentMethod || inferPaymentMethod(description, 'Outros'),
+      accountOrCard:
+        mapping.accountOrCard ||
+        state.settings.accounts[0] ||
+        state.settings.cards[0] ||
+        'Conta',
+      fileName: preview.fileName,
+    });
+
+    const hash =
+      item.externalHash ||
+      simpleHash([item.date, item.description, item.type, item.amount, item.source]);
+
+    if (existingHashes.has(hash) || batchHashes.has(hash)) {
+      ignored.push({
+        fileName: preview.fileName,
+        reason: 'Duplicado ignorado.',
+        raw: item.description,
+      });
+      return;
+    }
+
+    batchHashes.add(hash);
+    transactions.push(item);
+  });
+
+  return {
+    transactions,
+    ignored,
+    warnings,
+  };
 }
 
 function isCaixaPeriodPdf(text: string) {
