@@ -35,6 +35,7 @@ import type {
   Budget,
   FinanceState,
   FutureBill,
+  ImportProfile,
   ImportResult,
   Installment,
   Investment,
@@ -1312,6 +1313,8 @@ function ImportPage({ state, updateState }: PageProps) {
   const [loading, setLoading] = useState(false);
   const [genericCsvPreview, setGenericCsvPreview] =
     useState<GenericCsvPreview | null>(null);
+  const [selectedImportProfileId, setSelectedImportProfileId] = useState("");
+  const [genericCsvProfileName, setGenericCsvProfileName] = useState("");
   const [genericCsvMapping, setGenericCsvMapping] =
     useState<GenericCsvMapping>({
       dateColumn: "",
@@ -1438,6 +1441,108 @@ function ImportPage({ state, updateState }: PageProps) {
     }));
   };
 
+  const importProfiles = state.settings.importProfiles || [];
+
+  const getCsvColumnsSignature = (columns: string[]) =>
+    columns.map((column) => slug(column)).join("|");
+
+  const normalizeProfileMappingForPreview = (
+    mapping: GenericCsvMapping,
+    preview: GenericCsvPreview
+  ): GenericCsvMapping => {
+    const hasColumn = (column: string) => preview.columns.includes(column);
+
+    return {
+      ...mapping,
+      dateColumn: hasColumn(mapping.dateColumn) ? mapping.dateColumn : "",
+      descriptionColumn: hasColumn(mapping.descriptionColumn)
+        ? mapping.descriptionColumn
+        : "",
+      amountColumn: hasColumn(mapping.amountColumn) ? mapping.amountColumn : "",
+      typeColumn:
+        mapping.typeColumn && hasColumn(mapping.typeColumn)
+          ? mapping.typeColumn
+          : "",
+    };
+  };
+
+  const applySavedImportProfile = (profileId: string) => {
+    setSelectedImportProfileId(profileId);
+
+    if (!genericCsvPreview) return;
+
+    if (!profileId) {
+      setGenericCsvMapping(createDefaultGenericCsvMapping(genericCsvPreview));
+      setGenericCsvProfileName("");
+      return;
+    }
+
+    const profile = importProfiles.find((item) => item.id === profileId);
+
+    if (!profile) return;
+
+    setGenericCsvMapping(
+      normalizeProfileMappingForPreview(
+        profile.mapping as GenericCsvMapping,
+        genericCsvPreview
+      )
+    );
+    setGenericCsvProfileName(profile.name);
+  };
+
+  const saveGenericCsvProfile = () => {
+    if (!genericCsvPreview) return;
+
+    if (
+      !genericCsvMapping.dateColumn ||
+      !genericCsvMapping.descriptionColumn ||
+      !genericCsvMapping.amountColumn
+    ) {
+      alert("Selecione data, descrição e valor antes de salvar o perfil.");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const existingProfile = importProfiles.find(
+      (item) => item.id === selectedImportProfileId
+    );
+
+    const nextProfile: ImportProfile = {
+      id: existingProfile?.id || uid("ip"),
+      name:
+        genericCsvProfileName.trim() ||
+        existingProfile?.name ||
+        `Perfil ${genericCsvPreview.fileName}`,
+      fileType: "csv",
+      columnsSignature: getCsvColumnsSignature(genericCsvPreview.columns),
+      mapping: genericCsvMapping,
+      createdAt: existingProfile?.createdAt || now,
+      updatedAt: now,
+    };
+
+    updateState((prev) => {
+      const currentProfiles = prev.settings.importProfiles || [];
+      const alreadyExists = currentProfiles.some(
+        (item) => item.id === nextProfile.id
+      );
+
+      return {
+        ...prev,
+        settings: {
+          ...prev.settings,
+          importProfiles: alreadyExists
+            ? currentProfiles.map((item) =>
+                item.id === nextProfile.id ? nextProfile : item
+              )
+            : [...currentProfiles, nextProfile],
+        },
+      };
+    });
+
+    setSelectedImportProfileId(nextProfile.id);
+    setGenericCsvProfileName(nextProfile.name);
+  };
+
   const parse = async (files: FileList | null) => {
     if (!files?.length) return;
 
@@ -1453,9 +1558,32 @@ function ImportPage({ state, updateState }: PageProps) {
 
       if (unknownCsvPreviews.length > 0) {
         const preview = unknownCsvPreviews[0];
+        const signature = getCsvColumnsSignature(preview.columns);
+
+        const matchedProfile = importProfiles.find(
+          (profile) =>
+            profile.fileType === "csv" &&
+            profile.columnsSignature === signature
+        );
+
         setGenericCsvPreview(preview);
-        setGenericCsvMapping(createDefaultGenericCsvMapping(preview));
+
+        if (matchedProfile) {
+          setSelectedImportProfileId(matchedProfile.id);
+          setGenericCsvProfileName(matchedProfile.name);
+          setGenericCsvMapping(
+            normalizeProfileMappingForPreview(
+              matchedProfile.mapping as GenericCsvMapping,
+              preview
+            )
+          );
+        } else {
+          setSelectedImportProfileId("");
+          setGenericCsvProfileName("");
+          setGenericCsvMapping(createDefaultGenericCsvMapping(preview));
+        }
       }
+
     } catch (error) {
       console.error(error);
       alert(
@@ -1740,6 +1868,8 @@ function ImportPage({ state, updateState }: PageProps) {
   const clearPreview = () => {
     setResult(null);
     setGenericCsvPreview(null);
+    setSelectedImportProfileId("");
+    setGenericCsvProfileName("");
   };
 
     const reconciliationAlerts = result
@@ -1802,9 +1932,21 @@ function ImportPage({ state, updateState }: PageProps) {
             <button
               className="secondary"
               type="button"
-              onClick={() => setGenericCsvPreview(null)}
+              onClick={() => {
+                setGenericCsvPreview(null);
+                setSelectedImportProfileId("");
+                setGenericCsvProfileName("");
+              }}
             >
               Ignorar CSV
+            </button>
+
+            <button
+              className="secondary"
+              type="button"
+              onClick={saveGenericCsvProfile}
+            >
+              Salvar perfil
             </button>
 
             <button
@@ -1820,6 +1962,33 @@ function ImportPage({ state, updateState }: PageProps) {
         <div className="notice warn">
           Este CSV não foi reconhecido automaticamente. Escolha quais colunas
           representam data, descrição e valor.
+        </div>
+        <div className="import-profile-row">
+          <label className="field">
+            <span>Perfil salvo</span>
+            <select
+              value={selectedImportProfileId}
+              onChange={(e) => applySavedImportProfile(e.target.value)}
+            >
+              <option value="">Não usar perfil salvo</option>
+              {importProfiles
+                .filter((profile) => profile.fileType === "csv")
+                .map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Nome do perfil</span>
+            <input
+              value={genericCsvProfileName}
+              placeholder="Exemplo: Fatura cartão XP"
+              onChange={(e) => setGenericCsvProfileName(e.target.value)}
+            />
+          </label>
         </div>
 
         <div className="import-mapping-grid">

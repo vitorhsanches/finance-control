@@ -1201,6 +1201,27 @@ input.money-input.money-negative {
 }
 
 /* ================================
+   Import profiles
+   ================================ */
+
+.import-profile-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
+  gap: 12px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+@media (max-width: 720px) {
+  .import-profile-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ================================
    Mobile cleanup - Fase 1.2A
    ================================ */
 

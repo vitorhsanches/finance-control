@@ -21,7 +21,8 @@ export function sampleState(): FinanceState {
         { cardName: 'Nubank', closingDay: 20, dueDay: 27 },
         { cardName: 'Itaú', closingDay: 25, dueDay: 5 },
         { cardName: 'Inter', closingDay: 15, dueDay: 22 }
-      ]
+      ],
+      importProfiles: []
     },
     transactions: [
       {
@@ -148,6 +149,9 @@ export function normalizeState(data: Partial<FinanceState> | null | undefined): 
   const cards = Array.isArray(settings.cards) ? settings.cards : sample.settings.cards;
   const existingRules = Array.isArray(settings.cardRules) ? settings.cardRules : [];
   settings.cardRules = cards.map((card) => existingRules.find((r) => r.cardName === card) || { cardName: card, closingDay: 20, dueDay: 10 });
+  settings.importProfiles = Array.isArray(settings.importProfiles)
+  ? settings.importProfiles
+  : [];
 
   return {
     settings,

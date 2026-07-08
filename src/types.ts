@@ -7,6 +7,28 @@ export interface CardRule {
   dueDay: number;
 }
 
+export interface ImportProfileMapping {
+  dateColumn: string;
+  descriptionColumn: string;
+  amountColumn: string;
+  typeColumn: string;
+  accountOrCard: string;
+  paymentMethod: string;
+  incomeTypeValues: string;
+  expenseTypeValues: string;
+  negativeMeansExpense: boolean;
+}
+
+export interface ImportProfile {
+  id: string;
+  name: string;
+  fileType: 'csv';
+  columnsSignature: string;
+  mapping: ImportProfileMapping;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Settings {
   currency: string;
   selectedMonth: string;
@@ -20,6 +42,7 @@ export interface Settings {
   cards: string[];
   paymentMethods: string[];
   cardRules: CardRule[];
+  importProfiles: ImportProfile[];
 }
 
 export interface Transaction {
