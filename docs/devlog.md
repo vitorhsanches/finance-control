@@ -21,3 +21,9 @@ Changed files:
 -  M src/data/sample.ts
 -  M src/index.css
 -  M src/types.ts
+
+## 2026-07-11 12:32
+- feat: save csv import profiles
+
+Changed files:
+-  M src/lib/storage.ts

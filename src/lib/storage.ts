@@ -177,7 +177,9 @@ const cardRules = (cardRulesRes.data || []).map((row): CardRule => ({
 
     cardRules: cardRules.length > 0
       ? cardRules
-      : defaultSettings.cardRules
+      : defaultSettings.cardRules,
+
+    importProfiles: defaultSettings.importProfiles || [],
   };
 
   const remoteState: FinanceState = {
