@@ -328,11 +328,30 @@ export async function saveRemoteState(userId: string, state: FinanceState) {
     due_day: rule.dueDay
   })));
 
-  await replaceRows('transactions', userId, normalized.transactions.map((item) => transactionToRow(userId, item)));
-  await replaceRows('installments', userId, normalized.installments.map((item) => installmentToRow(userId, item)));
-  await replaceRows('future_bills', userId, normalized.bills.map((item) => billToRow(userId, item)));
-  await replaceRows('investments', userId, normalized.investments.map((item) => investmentToRow(userId, item)));
-  await replaceRows('budgets', userId, normalized.budgets.map((item) => budgetToRow(userId, item)));
+  await upsertRows(
+    'transactions',
+    normalized.transactions.map((item) => transactionToRow(userId, item))
+  );
+
+  await upsertRows(
+    'installments',
+    normalized.installments.map((item) => installmentToRow(userId, item))
+  );
+
+  await upsertRows(
+    'future_bills',
+    normalized.bills.map((item) => billToRow(userId, item))
+  );
+
+  await upsertRows(
+    'investments',
+    normalized.investments.map((item) => investmentToRow(userId, item))
+  );
+
+  await upsertRows(
+    'budgets',
+    normalized.budgets.map((item) => budgetToRow(userId, item))
+  );
 }
 
 async function tryLoadLegacyFinanceState(userId: string): Promise<FinanceState | null> {
@@ -350,6 +369,19 @@ async function tryLoadLegacyFinanceState(userId: string): Promise<FinanceState |
 
   if (!data?.data) return null;
   return normalizeState(data.data as Partial<FinanceState>);
+}
+
+async function upsertRows(
+  tableName: string,
+  rows: Array<Record<string, unknown>>
+) {
+  if (!supabase || rows.length === 0) return;
+
+  await throwIfError(
+    supabase
+      .from(tableName)
+      .upsert(rows)
+  );
 }
 
 async function replaceRows(tableName: string, userId: string, rows: Array<Record<string, unknown>>) {
