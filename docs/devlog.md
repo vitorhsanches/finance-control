@@ -39,3 +39,10 @@ Changed files:
 
 Changed files:
 - M  src/lib/storage.ts
+
+## 2026-07-12 17:45
+- style: improve application-wide UX and frontend consistency
+
+Changed files:
+-  M src/App.tsx
+-  M src/index.css

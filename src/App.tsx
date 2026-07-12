@@ -17,11 +17,14 @@ import {
 
 import {
   Download,
+  AlertCircle,
+  CheckCircle2,
   FileUp,
   LayoutDashboard,
   ListChecks,
   LogOut,
   Menu,
+  LoaderCircle,
   PiggyBank,
   Plus,
   Receipt,
@@ -116,6 +119,17 @@ const navItems: Array<{ id: PageKey; label: string; icon: JSX.Element }> = [
   },
   { id: "settings", label: "Configurações", icon: <Settings size={18} /> },
 ];
+
+const pageDescriptions: Record<PageKey, string> = {
+  dashboard: "Visão geral da sua vida financeira no mês selecionado.",
+  transactions: "Registre, revise e organize receitas e despesas.",
+  import: "Concilie arquivos do banco ou cartão antes de adicionar lançamentos.",
+  installments: "Acompanhe compras parceladas e o impacto nas próximas faturas.",
+  bills: "Planeje vencimentos, recorrências e pagamentos futuros.",
+  investments: "Monitore patrimônio, rentabilidade e distribuição dos investimentos.",
+  budgets: "Defina limites e acompanhe o orçamento por categoria.",
+  settings: "Personalize seu perfil, listas e regras financeiras.",
+};
 
 export function App() {
   const [state, setState] = useState<FinanceState>(() => loadLocalState());
@@ -368,6 +382,9 @@ export function App() {
   const syncStatus = saveError
     ? saveError
     : `${status}${email ? ` · ${email}` : ""}${lastSavedAt ? ` · último salvamento: ${lastSavedAt}` : ""}`;
+  const isSyncing = status.includes("Salvando") || status.includes("Carregando");
+  const syncTone = saveError ? "error" : isSyncing ? "syncing" : "ready";
+  const SyncIcon = saveError ? AlertCircle : isSyncing ? LoaderCircle : CheckCircle2;
     if (isSupabaseConfigured && !userId) {
       return <AuthScreen />;
     }
@@ -448,9 +465,14 @@ export function App() {
 
       <main className="main">
         <header className="topbar">
-          <div>
+          <div className="page-heading">
             <h1>{navItems.find((item) => item.id === activePage)?.label}</h1>
-            <p className="sync-status">{syncStatus}</p>
+            <p className="page-description">{pageDescriptions[activePage]}</p>
+            <div className={`sync-status ${syncTone}`} role="status" aria-live="polite" title={syncStatus}>
+              <SyncIcon size={14} className={isSyncing ? "spin" : undefined} />
+              <span>{saveError || status}</span>
+              {lastSavedAt && !saveError && <time>Salvo {lastSavedAt}</time>}
+            </div>
           </div>
         <div className="topbar-actions">
           <label className="field compact">
