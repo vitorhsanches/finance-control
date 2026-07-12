@@ -1,9 +1,21 @@
-import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { FinanceState, IgnoredImportItem, ImportResult, Transaction } from '../types';
 import { parseDateToISO, simpleHash, slug, toNumber, uid } from './utils';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+let pdfJsPromise: Promise<typeof import('pdfjs-dist')> | null = null;
+
+async function getPdfJs() {
+  if (!pdfJsPromise) {
+    pdfJsPromise = Promise.all([
+      import('pdfjs-dist'),
+      import('pdfjs-dist/build/pdf.worker.min.mjs?url')
+    ]).then(([pdfjsLib, workerModule]) => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+      return pdfjsLib;
+    });
+  }
+
+  return pdfJsPromise;
+}
 
 export type CsvRow = Record<string, string>;
 
@@ -283,6 +295,7 @@ function parseNubankCardCsv(fileName: string, text: string, ignored: IgnoredImpo
 }
 
 async function extractPdfText(file: File) {
+  const pdfjsLib = await getPdfJs();
   const buffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   const pages: string[] = [];

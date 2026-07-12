@@ -46,3 +46,11 @@ Changed files:
 Changed files:
 -  M src/App.tsx
 -  M src/index.css
+
+## 2026-07-12 18:04
+- refactor: improve performance and extract reusable UI components
+
+Changed files:
+-  M src/App.tsx
+-  M src/lib/importers.ts
+- ?? src/components/

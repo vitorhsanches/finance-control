@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AreaChart,
   Area,
@@ -89,6 +88,16 @@ import {
   type GenericCsvMapping,
   type GenericCsvPreview,
 } from "./lib/importers";
+import {
+  Empty,
+  MetricCard,
+  MoneyInput,
+  NumberField,
+  Panel,
+  Select,
+  StatusBadge,
+  TextArea,
+} from "./components/ui";
 
 const COLORS = [
   "#2563eb",
@@ -279,15 +288,18 @@ export function App() {
     };
   }, [state, userId, remoteReady]);
 
-  const updateState = (updater: (prev: FinanceState) => FinanceState) =>
-    setState((prev) => normalizeState(updater(prev)));
+  const updateState = useCallback(
+    (updater: (prev: FinanceState) => FinanceState) =>
+      setState((prev) => normalizeState(updater(prev))),
+    [],
+  );
 
-  const setSelectedMonth = (month: string) => {
+  const setSelectedMonth = useCallback((month: string) => {
     updateState((prev) => ({
       ...prev,
       settings: { ...prev.settings, selectedMonth: month },
     }));
-  };
+  }, [updateState]);
 
   const exportBackup = () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], {
@@ -721,35 +733,47 @@ function Dashboard({
   displayName: string;
   email: string | null;
 }) {
-  const metrics = getMetrics(state, month);
-  const categoryData = expensesByCategory(state, month).slice(0, 8);
-  const budgetData = budgetRows(state, month);
-  const upcoming = upcomingBills(state, 7);
   const [showDashboardDetails, setShowDashboardDetails] = useState(false);
-  const evolution = Array.from({ length: 6 }, (_, i) => {
-    const m = addMonths(month, i - 5);
-    const mm = getMetrics(state, m);
+  const {
+    metrics,
+    categoryData,
+    budgetData,
+    upcoming,
+    evolution,
+    monthExpenseItems,
+    monthFutureBillItems,
+    monthInstallmentItems,
+  } = useMemo(() => {
+    const evolutionRows = Array.from({ length: 6 }, (_, i) => {
+      const evolutionMonth = addMonths(month, i - 5);
+      const evolutionMetrics = getMetrics(state, evolutionMonth);
+      return {
+        month: evolutionMonth.slice(5),
+        receitas: evolutionMetrics.monthIncome,
+        despesas: evolutionMetrics.monthExpenses,
+      };
+    });
+
     return {
-      month: m.slice(5),
-      receitas: mm.monthIncome,
-      despesas: mm.monthExpenses,
+      metrics: getMetrics(state, month),
+      categoryData: expensesByCategory(state, month).slice(0, 8),
+      budgetData: budgetRows(state, month),
+      upcoming: upcomingBills(state, 7),
+      evolution: evolutionRows,
+      monthExpenseItems: state.transactions
+        .filter(
+          (transaction) =>
+            transaction.type === "expense" && ym(transaction.date) === month,
+        )
+        .sort((a, b) => toNumber(b.amount) - toNumber(a.amount)),
+      monthFutureBillItems: state.bills
+        .filter((bill) => ym(bill.dueDate) === month && !bill.paid)
+        .sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || "")),
+      monthInstallmentItems: getInstallmentsForMonth(state, month).sort(
+        (a, b) => a.dueDate.localeCompare(b.dueDate),
+      ),
     };
-  });
-
-  const monthExpenseItems = state.transactions
-    .filter(
-      (transaction) =>
-        transaction.type === "expense" && ym(transaction.date) === month
-    )
-    .sort((a, b) => toNumber(b.amount) - toNumber(a.amount));
-
-  const monthFutureBillItems = state.bills
-    .filter((bill) => ym(bill.dueDate) === month && !bill.paid)
-    .sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""));
-
-  const monthInstallmentItems = getInstallmentsForMonth(state, month).sort(
-    (a, b) => a.dueDate.localeCompare(b.dueDate)
-  );
+  }, [state, month]);
 
   const welcomeName = displayName.trim() || email?.split("@")[0] || "bem-vindo";
 
@@ -1069,10 +1093,14 @@ function TransactionsPage({
   const [category, setCategory] = useState("Todos");
   const [type, setType] = useState("Todos");
   const [pendingDateChanges, setPendingDateChanges] = useState<Record<string, string>>({});
-  const rows = state.transactions
-    .filter((t) => ym(t.date) === month)
-    .filter((t) => category === "Todos" || t.category === category)
-    .filter((t) => type === "Todos" || t.type === type);
+  const rows = useMemo(
+    () =>
+      state.transactions
+        .filter((t) => ym(t.date) === month)
+        .filter((t) => category === "Todos" || t.category === category)
+        .filter((t) => type === "Todos" || t.type === type),
+    [state.transactions, month, category, type],
+  );
   const fallbackExpenseCategories = [
     "Alimentação",
     "Transporte",
@@ -4545,169 +4573,6 @@ return (
 interface PageProps {
   state: FinanceState;
   updateState: (updater: (prev: FinanceState) => FinanceState) => void;
-}
-
-function MoneyInput({
-  value,
-  onChange,
-  className,
-}: {
-  value: number;
-  onChange: (value: number) => void;
-  className?: string;
-}) {
-  const [draft, setDraft] = useState(
-    value ? String(value).replace(".", ",") : "",
-  );
-  const [focused, setFocused] = useState(false);
-
-  useEffect(() => {
-    if (!focused) {
-      setDraft(value ? String(value).replace(".", ",") : "");
-    }
-  }, [value, focused]);
-
-  const commit = () => {
-    const parsed = toNumber(draft);
-    onChange(parsed);
-    setDraft(parsed ? String(parsed).replace(".", ",") : "");
-    setFocused(false);
-  };
-
-  return (
-    <input
-      className={className}
-      type="text"
-      inputMode="decimal"
-      value={draft}
-      onFocus={() => setFocused(true)}
-      onChange={(e) => {
-        const raw = e.target.value;
-        setDraft(raw);
-
-        if (!raw.endsWith(".") && !raw.endsWith(",")) {
-          onChange(toNumber(raw));
-        }
-      }}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.currentTarget.blur();
-        }
-      }}
-    />
-  );
-}
-function MetricCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "good" | "bad" | "warn" | "neutral";
-}) {
-  return (
-    <div className={`metric ${tone || "neutral"}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-function Panel({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: JSX.Element;
-  children: ReactNode;
-}) {
-  return (
-    <section className="panel">
-      <div className="panel-head">
-        <h2>{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-function Empty({ message }: { message: string }) {
-  return <div className="empty">{message}</div>;
-}
-function StatusBadge({
-  bad,
-  children,
-}: {
-  bad?: boolean;
-  children: ReactNode;
-}) {
-  return <span className={bad ? "badge bad" : "badge good"}>{children}</span>;
-}
-function Select({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-}) {
-  return (
-    <label className="field compact">
-      <span>{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o === "income" ? "Receita" : o === "expense" ? "Despesa" : o}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-function NumberField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <MoneyInput value={value} onChange={onChange} />
-    </label>
-  );
-}
-
-function TextArea({
-  label,
-  value,
-  onChange,
-  onBlur,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  onBlur?: () => void;
-}) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={onBlur}
-        rows={3}
-      />
-    </label>
-  );
 }
 
 function formatSaveTime(date = new Date()) {
