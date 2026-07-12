@@ -54,3 +54,18 @@ Changed files:
 -  M src/App.tsx
 -  M src/lib/importers.ts
 - ?? src/components/
+
+## 2026-07-12 18:15
+- test: add automated test foundation with Vitest
+
+Changed files:
+-  M .gitignore
+-  M package-lock.json
+-  M package.json
+-  M src/App.tsx
+- ?? src/App.test.tsx
+- ?? src/AuthScreen.test.tsx
+- ?? src/lib/calculations.test.ts
+- ?? src/lib/importers.test.ts
+- ?? src/test/
+- ?? vitest.config.ts

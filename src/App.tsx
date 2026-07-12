@@ -576,7 +576,7 @@ export function App() {
   );
 }
 
-function AuthScreen() {
+export function AuthScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"login" | "signup">("login");
