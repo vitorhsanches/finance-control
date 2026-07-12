@@ -146,6 +146,7 @@ export function App() {
   const [email, setEmail] = useState<string | null>(null);
   const [remoteReady, setRemoteReady] = useState(!isSupabaseConfigured);
   const saveTimer = useRef<number | null>(null);
+  const backupInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedMonth = state.settings.selectedMonth || currentMonth();
 
@@ -420,8 +421,10 @@ export function App() {
           <nav className="sidebar-nav">
             {navItems.map((item) => (
               <button
+                type="button"
                 key={item.id}
                 className={activePage === item.id ? "nav active" : "nav"}
+                aria-current={activePage === item.id ? "page" : undefined}
                 onClick={() => {
                   setActivePage(item.id);
                   setIsMobileNavOpen(false);
@@ -434,21 +437,28 @@ export function App() {
           </nav>
 
           <div className="sidebar-actions">
-            <button className="secondary full" onClick={exportBackup}>
+            <button type="button" className="secondary full" onClick={exportBackup}>
               <Download size={16} /> Exportar backup
             </button>
 
-            <label className="secondary full file-label">
+            <button
+              type="button"
+              className="secondary full file-label"
+              onClick={() => backupInputRef.current?.click()}
+            >
               <FileUp size={16} /> Importar backup
-              <input
-                hidden
-                type="file"
-                accept="application/json,.json"
-                onChange={(e) =>
-                  e.target.files?.[0] && importBackup(e.target.files[0])
-                }
-              />
-            </label>
+            </button>
+            <input
+              ref={backupInputRef}
+              hidden
+              type="file"
+              accept="application/json,.json"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) importBackup(file);
+                e.currentTarget.value = "";
+              }}
+            />
 
             {userId && (
               <button
@@ -634,7 +644,14 @@ function AuthScreen() {
 
   return (
     <div className="auth-screen">
-      <div className="auth-card">
+      <form
+        className="auth-card"
+        aria-busy={loading}
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
         <div className="auth-brand">
           <img
             className="auth-logo"
@@ -651,9 +668,12 @@ function AuthScreen() {
         <label className="field">
           <span>E-mail</span>
           <input
+            type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
+            autoComplete="email"
+            inputMode="email"
+            required
           />
         </label>
 
@@ -663,15 +683,18 @@ function AuthScreen() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            minLength={8}
+            required
           />
         </label>
 
-        <button className="primary full" onClick={submit} disabled={loading}>
+        <button type="submit" className="primary full" disabled={loading}>
           {loading ? "Aguarde..." : mode === "login" ? "Entrar" : "Criar conta"}
         </button>
 
         <button
+          type="button"
           className="link-button"
           onClick={() => {
             setMode(mode === "login" ? "signup" : "login");
@@ -681,8 +704,8 @@ function AuthScreen() {
           {mode === "login" ? "Criar uma nova conta" : "Já tenho conta"}
         </button>
 
-        {message && <div className="notice">{message}</div>}
-      </div>
+        {message && <div className="notice" role="status" aria-live="polite">{message}</div>}
+      </form>
     </div>
   );
 }
@@ -951,7 +974,11 @@ function Dashboard({
           {categoryData.length ? (
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
-                <Pie dataKey="value" data={categoryData} label>
+                <Pie
+                  dataKey="value"
+                  data={categoryData}
+                  label={({ value }) => money(Number(value), state)}
+                >
                   {categoryData.map((_entry, i) => (
                     <Cell key={i} fill={COLORS[i % COLORS.length]} />
                   ))}
@@ -968,7 +995,13 @@ function Dashboard({
             <AreaChart data={evolution}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="month" />
-              <YAxis />
+              <YAxis
+                tickFormatter={(value) =>
+                  Number(value).toLocaleString("pt-BR", {
+                    maximumFractionDigits: 2,
+                  })
+                }
+              />
               <Tooltip formatter={(v) => money(Number(v), state)} />
               <Area dataKey="receitas" />
               <Area dataKey="despesas" />
@@ -1317,7 +1350,13 @@ function TransactionsPage({
                     </div>
                   )}
 
-                  <button className="icon danger" onClick={() => remove(t.id)}>
+                  <button
+                    type="button"
+                    className="icon danger"
+                    aria-label={`Excluir lançamento ${t.description}`}
+                    title="Excluir lançamento"
+                    onClick={() => remove(t.id)}
+                  >
                     <Trash2 size={15} />
                   </button>
                 </td>
@@ -1944,7 +1983,7 @@ function ImportPage({ state, updateState }: PageProps) {
           />
         </label>
 
-        {loading && <div className="notice">Convertendo arquivos...</div>}
+        {loading && <div className="notice" role="status" aria-live="polite">Convertendo arquivos...</div>}
       </Panel>
       {genericCsvPreview && (
       <Panel
@@ -2939,7 +2978,10 @@ function InstallmentsPage({
 
                     <td>
                       <button
+                        type="button"
                         className="icon danger"
+                        aria-label={`Excluir parcelamento ${i.description}`}
+                        title="Excluir parcelamento"
                         onClick={() => remove(i.id)}
                       >
                         <Trash2 size={15} />
@@ -3537,7 +3579,10 @@ function BillsPage({
                       )}
 
                       <button
+                        type="button"
                         className="icon danger"
+                        aria-label={`Excluir conta futura ${bill.description}`}
+                        title="Excluir conta futura"
                         onClick={() => remove(bill.id)}
                       >
                         <Trash2 size={15} />
@@ -4131,7 +4176,10 @@ function InvestmentsPage({ state, updateState }: PageProps) {
 
                     <td>
                       <button
+                        type="button"
                         className="icon danger"
+                        aria-label={`Excluir investimento ${i.type}`}
+                        title="Excluir investimento"
                         onClick={() => remove(i.id)}
                       >
                         <Trash2 size={15} />
@@ -4245,7 +4293,13 @@ function BudgetsPage({
                   </StatusBadge>
                 </td>
                 <td>
-                  <button className="icon danger" onClick={() => remove(b.id)}>
+                  <button
+                    type="button"
+                    className="icon danger"
+                    aria-label={`Excluir orçamento de ${b.category}`}
+                    title="Excluir orçamento"
+                    onClick={() => remove(b.id)}
+                  >
                     <Trash2 size={15} />
                   </button>
                 </td>

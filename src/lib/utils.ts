@@ -54,7 +54,9 @@ export function toNumber(value: unknown): number {
 export function money(value: number, state?: FinanceState) {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
-    currency: state?.settings.currency || 'BRL'
+    currency: state?.settings.currency || 'BRL',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
   }).format(toNumber(value));
 }
 
