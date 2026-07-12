@@ -33,3 +33,9 @@ Changed files:
 
 Changed files:
 -  M src/lib/storage.ts
+
+## 2026-07-12 17:32
+- fix: prevent destructive financial autosave
+
+Changed files:
+- M  src/lib/storage.ts

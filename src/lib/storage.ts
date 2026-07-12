@@ -4,6 +4,7 @@ import { emptyState, normalizeState, sampleState } from '../data/sample';
 
 export const LOCAL_STORAGE_KEY = 'finance-control-react-v3';
 const LEGACY_LOCAL_STORAGE_KEY = 'finance-control-react-v1';
+let remoteSaveQueue: Promise<void> = Promise.resolve();
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
@@ -194,11 +195,20 @@ const cardRules = (cardRulesRes.data || []).map((row): CardRule => ({
   return withDefaultCatalogs(remoteState);
 }
 
-export async function saveRemoteState(userId: string, state: FinanceState) {
+export function saveRemoteState(userId: string, state: FinanceState): Promise<void> {
+  const snapshot = normalizeState(JSON.parse(JSON.stringify(state)) as FinanceState);
+  const queuedSave = remoteSaveQueue.then(() => persistRemoteState(userId, snapshot));
+
+  remoteSaveQueue = queuedSave.catch(() => undefined);
+
+  return queuedSave;
+}
+
+async function persistRemoteState(userId: string, state: FinanceState) {
   if (!supabase) return;
   const normalized = normalizeState(state);
 
-  await preventUnsafeEmptyOverwrite(userId, normalized);
+  await preventUnsafeEmptyCollectionOverwrites(userId, normalized);
   await preventUnsafeCatalogOverwrite(userId, normalized);
 
   await throwIfError(supabase.from('profiles').upsert({ user_id: userId, updated_at: new Date().toISOString() }));
@@ -214,52 +224,32 @@ export async function saveRemoteState(userId: string, state: FinanceState) {
     updated_at: new Date().toISOString()
   }));
 
-  function isFinancialStateEmpty(state: FinanceState) {
-    return (
-      state.transactions.length === 0 &&
-      state.installments.length === 0 &&
-      state.bills.length === 0 &&
-      state.investments.length === 0 &&
-      state.budgets.length === 0
-    );
-  }
+  async function preventUnsafeEmptyCollectionOverwrites(userId: string, state: FinanceState) {
+    if (!supabase) return;
 
-  async function getExistingFinancialRows(userId: string) {
-    if (!supabase) return 0;
-
-    const tables = [
-      'transactions',
-      'installments',
-      'future_bills',
-      'investments',
-      'budgets'
+    const collections = [
+      { tableName: 'transactions', label: 'lançamentos', localCount: state.transactions.length },
+      { tableName: 'installments', label: 'parcelamentos', localCount: state.installments.length },
+      { tableName: 'future_bills', label: 'contas futuras', localCount: state.bills.length },
+      { tableName: 'investments', label: 'investimentos', localCount: state.investments.length },
+      { tableName: 'budgets', label: 'orçamentos', localCount: state.budgets.length }
     ];
 
-    const counts = await Promise.all(
-      tables.map(async (tableName) => {
-        const { count, error } = await supabase
-          .from(tableName)
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', userId);
+    for (const collection of collections) {
+      if (collection.localCount > 0) continue;
 
-        if (error) throw error;
+      const { count, error } = await supabase
+        .from(collection.tableName)
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId);
 
-        return count || 0;
-      })
-    );
+      if (error) throw error;
 
-    return counts.reduce((total, count) => total + count, 0);
-  }
-
-  async function preventUnsafeEmptyOverwrite(userId: string, state: FinanceState) {
-    if (!isFinancialStateEmpty(state)) return;
-
-    const existingRows = await getExistingFinancialRows(userId);
-
-    if (existingRows > 0) {
-      throw new Error(
-        'Salvamento bloqueado: o app tentou salvar um estado financeiro vazio sobre dados existentes.'
-      );
+      if ((count || 0) > 0) {
+        throw new Error(
+          `Salvamento bloqueado: a coleção de ${collection.label} está vazia, mas existem registros remotos.`
+        );
+      }
     }
   }
 
@@ -314,6 +304,7 @@ export async function saveRemoteState(userId: string, state: FinanceState) {
     }
   }
 
+  // TODO: Catálogos ainda usam substituição total. Tornar a reconciliação não destrutiva em uma fase posterior.
   await replaceRows('categories', userId, [
     ...normalized.settings.categories.map((name, index) => ({ user_id: userId, kind: 'expense', name, sort_order: index })),
     ...normalized.settings.incomeCategories.map((name, index) => ({ user_id: userId, kind: 'income', name, sort_order: index }))
@@ -380,7 +371,10 @@ async function upsertRows(
   await throwIfError(
     supabase
       .from(tableName)
-      .upsert(rows)
+      .upsert(rows, {
+        onConflict: 'user_id,id',
+        ignoreDuplicates: false
+      })
   );
 }
 
