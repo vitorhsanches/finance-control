@@ -89,3 +89,12 @@ Changed files:
 -  M vitest.config.ts
 - ?? src/lib/bankImportFormats.test.ts
 - ?? src/test/fixtures/
+
+## 2026-07-12 23:46
+- refactor: split App into dedicated domain pages
+
+Changed files:
+-  M src/App.remote.test.tsx
+-  M src/App.tsx
+-  M src/lib/storage.ts
+- ?? src/pages/

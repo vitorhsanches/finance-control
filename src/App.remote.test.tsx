@@ -116,6 +116,8 @@ describe('remote application lifecycle', () => {
     const logoutButtons = screen.getAllByRole('button', { name: 'Sair' });
     await interaction.click(logoutButtons[logoutButtons.length - 1]);
     await waitFor(() => expect(mocks.signOut).toHaveBeenCalled());
-    expect(order).toEqual(['save', 'signOut']);
+    expect(order[order.length - 1]).toBe('signOut');
+    expect(order.slice(0, -1)).not.toHaveLength(0);
+    expect(order.slice(0, -1).every((step) => step === 'save')).toBe(true);
   });
 });

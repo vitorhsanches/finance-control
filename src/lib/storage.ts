@@ -1,7 +1,7 @@
 import type { Session } from '@supabase/supabase-js';
 import type { Budget, CardRule, FinanceState, FutureBill, Installment, Investment, Settings, Transaction } from '../types';
 import { emptyState, normalizeState, sampleState } from '../data/sample';
-import { isSupabaseConfigured, supabase } from './supabaseClient';
+import { supabase } from './supabaseClient';
 
 export { isSupabaseConfigured, supabase } from './supabaseClient';
 
