@@ -116,3 +116,12 @@ Changed files:
 -  M vitest.config.ts
 - ?? playwright.config.ts
 - ?? tests/
+
+## 2026-07-13 00:16
+- feat: add explainable financial insights
+
+Changed files:
+-  M src/index.css
+-  M src/pages/Dashboard.tsx
+- ?? src/lib/financialInsights.test.ts
+- ?? src/lib/financialInsights.ts

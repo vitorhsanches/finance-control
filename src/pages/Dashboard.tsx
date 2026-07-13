@@ -7,6 +7,10 @@ import type { FinanceState } from "../types";
 import {
   budgetRows, expensesByCategory, getInstallmentsForMonth, getMetrics, upcomingBills,
 } from "../lib/calculations";
+import {
+  getFinancialInsights,
+  type FinancialInsightFact,
+} from "../lib/financialInsights";
 import { addMonths, formatDate, money, toNumber, ym } from "../lib/utils";
 import { Empty, MetricCard, Panel, StatusBadge } from "../components/ui";
 
@@ -33,6 +37,7 @@ export function Dashboard({
     budgetData,
     upcoming,
     evolution,
+    insights,
     monthExpenseItems,
     monthFutureBillItems,
     monthInstallmentItems,
@@ -53,6 +58,7 @@ export function Dashboard({
       budgetData: budgetRows(state, month),
       upcoming: upcomingBills(state, 7),
       evolution: evolutionRows,
+      insights: getFinancialInsights(state, month),
       monthExpenseItems: state.transactions
         .filter(
           (transaction) =>
@@ -175,7 +181,38 @@ export function Dashboard({
           />
         </section>
       </div>
-      
+
+      <Panel title="Insights financeiros">
+        <p className="muted financial-insights-intro">
+          Leituras objetivas calculadas somente com seus lançamentos, contas, parcelas e orçamentos.
+        </p>
+        {insights.length ? (
+          <div className="financial-insights-grid" role="list">
+            {insights.map((insight) => (
+              <article
+                className={`financial-insight ${insight.tone}`}
+                key={insight.id}
+                role="listitem"
+              >
+                <div className="financial-insight-copy">
+                  <strong>{insight.title}</strong>
+                  <p>{insight.explanation}</p>
+                </div>
+                <dl className="financial-insight-facts" aria-label="Dados usados no cálculo">
+                  {insight.facts.map((fact) => (
+                    <div key={fact.label}>
+                      <dt>{fact.label}</dt>
+                      <dd>{formatInsightFact(fact, state)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <Empty message="Ainda não há dados suficientes para calcular insights deste mês." />
+        )}
+      </Panel>
 
       <div className="dashboard-details-toggle">
         <div>
@@ -378,3 +415,13 @@ export function Dashboard({
   );
 }
 
+function formatInsightFact(fact: FinancialInsightFact, state: FinanceState) {
+  if (fact.format === "currency") return money(Number(fact.value), state);
+  if (fact.format === "percent") {
+    const value = Number(fact.value);
+    const sign = value > 0 ? "+" : "";
+    return `${sign}${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+  }
+  if (fact.format === "date") return formatDate(String(fact.value));
+  return String(fact.value);
+}
