@@ -80,3 +80,12 @@ Changed files:
 - ?? src/lib/storage.test.ts
 - ?? src/lib/supabaseClient.ts
 - ?? src/test/supabaseMock.ts
+
+## 2026-07-12 23:35
+- test: add dedicated bank import format coverage
+
+Changed files:
+-  M src/test/setup.ts
+-  M vitest.config.ts
+- ?? src/lib/bankImportFormats.test.ts
+- ?? src/test/fixtures/
