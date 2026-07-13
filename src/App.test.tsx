@@ -99,6 +99,52 @@ describe('application flows', () => {
     expect(screen.getByText('Nenhuma conta vencendo nos próximos 7 dias.')).toBeInTheDocument();
   });
 
+  it('keeps financial insights collapsed by default and toggles them open and closed', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const toggle = screen.getByRole('button', { name: 'Ver insights' });
+    const insights = document.getElementById('dashboard-financial-insights');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveAttribute('aria-controls', 'dashboard-financial-insights');
+    expect(insights).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByText(/insights disponíveis para este mês/)).toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(screen.getByRole('button', { name: 'Ocultar insights' })).toHaveAttribute('aria-expanded', 'true');
+    expect(insights).toHaveAttribute('aria-hidden', 'false');
+
+    await user.click(screen.getByRole('button', { name: 'Ocultar insights' }));
+    expect(screen.getByRole('button', { name: 'Ver insights' })).toHaveAttribute('aria-expanded', 'false');
+    expect(insights).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('supports keyboard interaction for the financial insights disclosure', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const toggle = screen.getByRole('button', { name: 'Ver insights' });
+    toggle.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Ocultar insights' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Ocultar insights' })).toHaveAttribute('aria-expanded', 'true');
+
+    await user.keyboard(' ');
+    expect(screen.getByRole('button', { name: 'Ver insights' })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('summarizes an empty insight set and reveals its existing empty state', async () => {
+    const user = userEvent.setup();
+    const state = emptyState();
+    state.settings.selectedMonth = '2026-07';
+    mocks.loadLocalState.mockReturnValue(state);
+    render(<App />);
+
+    expect(screen.getByText('Nenhum insight disponível para este mês.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Ver insights' }));
+    expect(screen.getByText('Ainda não há dados suficientes para calcular insights deste mês.')).toBeInTheDocument();
+  });
+
   it('opens generic CSV mapping and generates an import preview', async () => {
     const user = userEvent.setup();
     render(<App />);

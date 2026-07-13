@@ -30,6 +30,7 @@ export function Dashboard({
   displayName: string;
   email: string | null;
 }) {
+  const [showInsights, setShowInsights] = useState(false);
   const [showDashboardDetails, setShowDashboardDetails] = useState(false);
   const {
     metrics,
@@ -182,36 +183,66 @@ export function Dashboard({
         </section>
       </div>
 
-      <Panel title="Insights financeiros">
-        <p className="muted financial-insights-intro">
-          Leituras objetivas calculadas somente com seus lançamentos, contas, parcelas e orçamentos.
-        </p>
-        {insights.length ? (
-          <div className="financial-insights-grid" role="list">
-            {insights.map((insight) => (
-              <article
-                className={`financial-insight ${insight.tone}`}
-                key={insight.id}
-                role="listitem"
-              >
-                <div className="financial-insight-copy">
-                  <strong>{insight.title}</strong>
-                  <p>{insight.explanation}</p>
-                </div>
-                <dl className="financial-insight-facts" aria-label="Dados usados no cálculo">
-                  {insight.facts.map((fact) => (
-                    <div key={fact.label}>
-                      <dt>{fact.label}</dt>
-                      <dd>{formatInsightFact(fact, state)}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <Empty message="Ainda não há dados suficientes para calcular insights deste mês." />
+      <Panel
+        title="Insights financeiros"
+        action={(
+          <button
+            className="secondary"
+            type="button"
+            aria-controls="dashboard-financial-insights"
+            aria-expanded={showInsights}
+            onClick={() => setShowInsights((current) => !current)}
+          >
+            {showInsights ? "Ocultar insights" : "Ver insights"}
+          </button>
         )}
+      >
+        {!showInsights && (
+          <p className="muted financial-insights-summary">
+            {insights.length === 1
+              ? "1 insight disponível para este mês."
+              : insights.length > 1
+                ? `${insights.length} insights disponíveis para este mês.`
+                : "Nenhum insight disponível para este mês."}
+          </p>
+        )}
+        <div
+          id="dashboard-financial-insights"
+          className={`financial-insights-disclosure ${showInsights ? "is-expanded" : ""}`}
+          aria-hidden={!showInsights}
+        >
+          <div className="financial-insights-disclosure-content">
+            <p className="muted financial-insights-intro">
+              Leituras objetivas calculadas somente com seus lançamentos, contas, parcelas e orçamentos.
+            </p>
+            {insights.length ? (
+              <div className="financial-insights-grid" role="list">
+                {insights.map((insight) => (
+                  <article
+                    className={`financial-insight ${insight.tone}`}
+                    key={insight.id}
+                    role="listitem"
+                  >
+                    <div className="financial-insight-copy">
+                      <strong>{insight.title}</strong>
+                      <p>{insight.explanation}</p>
+                    </div>
+                    <dl className="financial-insight-facts" aria-label="Dados usados no cálculo">
+                      {insight.facts.map((fact) => (
+                        <div key={fact.label}>
+                          <dt>{fact.label}</dt>
+                          <dd>{formatInsightFact(fact, state)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <Empty message="Ainda não há dados suficientes para calcular insights deste mês." />
+            )}
+          </div>
+        </div>
       </Panel>
 
       <div className="dashboard-details-toggle">

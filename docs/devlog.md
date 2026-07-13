@@ -125,3 +125,12 @@ Changed files:
 -  M src/pages/Dashboard.tsx
 - ?? src/lib/financialInsights.test.ts
 - ?? src/lib/financialInsights.ts
+
+## 2026-07-13 11:57
+- feat: make dashboard insights collapsible and add project instructions
+
+Changed files:
+-  M src/App.test.tsx
+-  M src/index.css
+-  M src/pages/Dashboard.tsx
+- ?? AGENTS.md
