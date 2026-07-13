@@ -1633,6 +1633,23 @@ button:disabled {
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.page-loading {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--primary);
+}
+
+.page-loading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.page-loading strong { color: var(--text); }
+.page-loading span { color: var(--muted); font-size: 13px; }
+
 .topbar-actions {
   flex-shrink: 0;
 }

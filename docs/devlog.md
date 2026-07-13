@@ -98,3 +98,10 @@ Changed files:
 -  M src/App.tsx
 -  M src/lib/storage.ts
 - ?? src/pages/
+
+## 2026-07-12 23:56
+- perf: add page-level lazy loading
+
+Changed files:
+-  M src/App.tsx
+-  M src/index.css

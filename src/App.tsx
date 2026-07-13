@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle, CheckCircle2, Download, FileUp, LayoutDashboard, ListChecks,
   LoaderCircle, LogOut, Menu, PiggyBank, Receipt, Settings, WalletCards, X,
@@ -10,10 +10,25 @@ import {
   saveLocalState, saveProfile, saveRemoteState, supabase,
 } from "./lib/storage";
 import { currentMonth } from "./lib/utils";
-import {
-  BillsPage, BudgetsPage, Dashboard, ImportPage, InstallmentsPage,
-  InvestmentsPage, SettingsPage, TransactionsPage,
-} from "./pages";
+import { BudgetsPage } from "./pages/BudgetsPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { TransactionsPage } from "./pages/TransactionsPage";
+
+const Dashboard = lazy(() =>
+  import("./pages/Dashboard").then((module) => ({ default: module.Dashboard })),
+);
+const ImportPage = lazy(() =>
+  import("./pages/ImportPage").then((module) => ({ default: module.ImportPage })),
+);
+const InstallmentsPage = lazy(() =>
+  import("./pages/InstallmentsPage").then((module) => ({ default: module.InstallmentsPage })),
+);
+const BillsPage = lazy(() =>
+  import("./pages/BillsPage").then((module) => ({ default: module.BillsPage })),
+);
+const InvestmentsPage = lazy(() =>
+  import("./pages/InvestmentsPage").then((module) => ({ default: module.InvestmentsPage })),
+);
 
 const navItems: Array<{ id: PageKey; label: string; icon: JSX.Element }> = [
   { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={18} /> },
@@ -423,61 +438,75 @@ export function App() {
         </div>
         </header>
 
-        {activePage === "dashboard" && (
-          <Dashboard
-            state={state}
-            month={selectedMonth}
-            displayName={displayName}
-            email={email}
-          />
-        )}
-        {activePage === "transactions" && (
-          <TransactionsPage
-            state={state}
-            updateState={updateState}
-            month={selectedMonth}
-          />
-        )}
-        {activePage === "import" && (
-          <ImportPage state={state} updateState={updateState} />
-        )}
-        {activePage === "installments" && (
-          <InstallmentsPage
-            state={state}
-            updateState={updateState}
-            month={selectedMonth}
-          />
-        )}
-        {activePage === "bills" && (
-          <BillsPage
-            state={state}
-            updateState={updateState}
-            month={selectedMonth}
-          />
-        )}
-        {activePage === "investments" && (
-          <InvestmentsPage state={state} updateState={updateState} />
-        )}
-        {activePage === "budgets" && (
-          <BudgetsPage
-            state={state}
-            updateState={updateState}
-            month={selectedMonth}
-          />
-        )}
-        {activePage === "settings" && (
-          <SettingsPage
-            state={state}
-            updateState={updateState}
-            email={email}
-            displayNameDraft={displayNameDraft}
-            setDisplayNameDraft={setDisplayNameDraft}
-            onSaveProfile={handleSaveProfile}
-            profileMessage={profileMessage}
-          />
-        )}
+        <Suspense fallback={<PageLoading />}>
+          {activePage === "dashboard" && (
+            <Dashboard
+              state={state}
+              month={selectedMonth}
+              displayName={displayName}
+              email={email}
+            />
+          )}
+          {activePage === "transactions" && (
+            <TransactionsPage
+              state={state}
+              updateState={updateState}
+              month={selectedMonth}
+            />
+          )}
+          {activePage === "import" && (
+            <ImportPage state={state} updateState={updateState} />
+          )}
+          {activePage === "installments" && (
+            <InstallmentsPage
+              state={state}
+              updateState={updateState}
+              month={selectedMonth}
+            />
+          )}
+          {activePage === "bills" && (
+            <BillsPage
+              state={state}
+              updateState={updateState}
+              month={selectedMonth}
+            />
+          )}
+          {activePage === "investments" && (
+            <InvestmentsPage state={state} updateState={updateState} />
+          )}
+          {activePage === "budgets" && (
+            <BudgetsPage
+              state={state}
+              updateState={updateState}
+              month={selectedMonth}
+            />
+          )}
+          {activePage === "settings" && (
+            <SettingsPage
+              state={state}
+              updateState={updateState}
+              email={email}
+              displayNameDraft={displayNameDraft}
+              setDisplayNameDraft={setDisplayNameDraft}
+              onSaveProfile={handleSaveProfile}
+              profileMessage={profileMessage}
+            />
+          )}
+        </Suspense>
       </main>
     </div>
+  );
+}
+
+function PageLoading() {
+  return (
+    <section className="panel page-loading" role="status" aria-live="polite">
+      <LoaderCircle className="spin" size={24} aria-hidden="true" />
+      <div>
+        <strong>Carregando página...</strong>
+        <span>Preparando seus dados financeiros.</span>
+      </div>
+    </section>
   );
 }
 
