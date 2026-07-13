@@ -69,3 +69,14 @@ Changed files:
 - ?? src/lib/importers.test.ts
 - ?? src/test/
 - ?? vitest.config.ts
+
+## 2026-07-12 23:28
+- test: expand Supabase persistence and remote lifecycle coverage
+
+Changed files:
+-  M src/App.test.tsx
+-  M src/lib/storage.ts
+- ?? src/App.remote.test.tsx
+- ?? src/lib/storage.test.ts
+- ?? src/lib/supabaseClient.ts
+- ?? src/test/supabaseMock.ts

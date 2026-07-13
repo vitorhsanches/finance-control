@@ -1,16 +1,13 @@
-import { createClient, Session } from '@supabase/supabase-js';
+import type { Session } from '@supabase/supabase-js';
 import type { Budget, CardRule, FinanceState, FutureBill, Installment, Investment, Settings, Transaction } from '../types';
 import { emptyState, normalizeState, sampleState } from '../data/sample';
+import { isSupabaseConfigured, supabase } from './supabaseClient';
+
+export { isSupabaseConfigured, supabase } from './supabaseClient';
 
 export const LOCAL_STORAGE_KEY = 'finance-control-react-v3';
 const LEGACY_LOCAL_STORAGE_KEY = 'finance-control-react-v1';
 let remoteSaveQueue: Promise<void> = Promise.resolve();
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey && !supabaseUrl.includes('SEU-PROJETO'));
-export const supabase = isSupabaseConfigured ? createClient(supabaseUrl!, supabaseAnonKey!) : null;
-
 export function loadLocalState(): FinanceState {
   const raw = localStorage.getItem(LOCAL_STORAGE_KEY) || localStorage.getItem(LEGACY_LOCAL_STORAGE_KEY);
   if (!raw) return sampleState();

@@ -130,4 +130,23 @@ describe('application flows', () => {
     await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Arquivo inválido'));
     await waitFor(() => expect(screen.queryByText('Convertendo arquivos...')).not.toBeInTheDocument());
   });
+
+  it('exports and imports JSON backups through the local state boundary', async () => {
+    const user = userEvent.setup();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Exportar backup' }));
+    expect(URL.createObjectURL).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
+
+    const imported = emptyState();
+    imported.settings.startingBalance = 987.65;
+    const input = document.querySelector<HTMLInputElement>('input[accept="application/json,.json"]');
+    expect(input).not.toBeNull();
+    await user.upload(input!, new File([JSON.stringify(imported)], 'backup.json', { type: 'application/json' }));
+    await waitFor(() => expect(mocks.saveLocalState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 987.65 }) })
+    ));
+  });
 });
