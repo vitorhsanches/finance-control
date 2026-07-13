@@ -105,3 +105,14 @@ Changed files:
 Changed files:
 -  M src/App.tsx
 -  M src/index.css
+
+## 2026-07-13 00:08
+- test: add Playwright end-to-end coverage
+
+Changed files:
+-  M .gitignore
+-  M package-lock.json
+-  M package.json
+-  M vitest.config.ts
+- ?? playwright.config.ts
+- ?? tests/
