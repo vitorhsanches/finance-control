@@ -134,3 +134,11 @@ Changed files:
 -  M src/index.css
 -  M src/pages/Dashboard.tsx
 - ?? AGENTS.md
+
+## 2026-07-15 14:25
+- style: simplify app shell and group sidebar navigation
+
+Changed files:
+-  M src/App.test.tsx
+-  M src/App.tsx
+-  M src/index.css

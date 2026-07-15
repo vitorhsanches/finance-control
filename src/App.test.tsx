@@ -65,6 +65,23 @@ beforeEach(() => {
 });
 
 describe('application flows', () => {
+  it('keeps the topbar focused and groups navigation with utilities in the sidebar', () => {
+    render(<App />);
+
+    const navigation = screen.getByRole('navigation', { name: 'Navegação principal' });
+    for (const group of ['Visão geral', 'Movimentação', 'Planejamento', 'Sistema']) {
+      expect(navigation).toHaveTextContent(group);
+    }
+
+    const topbar = screen.getByRole('banner');
+    expect(topbar).toHaveTextContent('Dashboard');
+    expect(topbar).toHaveTextContent('Mês');
+    expect(topbar).not.toHaveTextContent('Modo local');
+    expect(screen.getByTitle('Modo local')).toHaveTextContent('Modo local');
+    expect(screen.getByRole('button', { name: 'Exportar backup' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Importar backup' })).toBeInTheDocument();
+  });
+
   it('renders and navigates between the main pages', async () => {
     const user = userEvent.setup();
     render(<App />);

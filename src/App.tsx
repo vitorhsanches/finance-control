@@ -49,16 +49,12 @@ const navItems: Array<{ id: PageKey; label: string; icon: JSX.Element }> = [
   { id: "settings", label: "Configurações", icon: <Settings size={18} /> },
 ];
 
-const pageDescriptions: Record<PageKey, string> = {
-  dashboard: "Visão geral da sua vida financeira no mês selecionado.",
-  transactions: "Registre, revise e organize receitas e despesas.",
-  import: "Concilie arquivos do banco ou cartão antes de adicionar lançamentos.",
-  installments: "Acompanhe compras parceladas e o impacto nas próximas faturas.",
-  bills: "Planeje vencimentos, recorrências e pagamentos futuros.",
-  investments: "Monitore patrimônio, rentabilidade e distribuição dos investimentos.",
-  budgets: "Defina limites e acompanhe o orçamento por categoria.",
-  settings: "Personalize seu perfil, listas e regras financeiras.",
-};
+const navGroups: Array<{ label: string; items: PageKey[] }> = [
+  { label: "Visão geral", items: ["dashboard"] },
+  { label: "Movimentação", items: ["transactions", "import"] },
+  { label: "Planejamento", items: ["installments", "bills", "budgets", "investments"] },
+  { label: "Sistema", items: ["settings"] },
+];
 
 export function App() {
   const [state, setState] = useState<FinanceState>(() => loadLocalState());
@@ -350,32 +346,47 @@ export function App() {
         </div>
 
         <div className="mobile-nav-content">
-          <nav className="sidebar-nav">
-            {navItems.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                className={activePage === item.id ? "nav active" : "nav"}
-                aria-current={activePage === item.id ? "page" : undefined}
-                onClick={() => {
-                  setActivePage(item.id);
-                  setIsMobileNavOpen(false);
-                }}
-              >
-                {item.icon}
-                {item.label}
-              </button>
+          <nav className="sidebar-nav" aria-label="Navegação principal">
+            {navGroups.map((group) => (
+              <div className="nav-group" key={group.label}>
+                <span className="nav-group-label">{group.label}</span>
+                {group.items.map((id) => {
+                  const item = navItems.find((navItem) => navItem.id === id)!;
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      className={activePage === item.id ? "nav active" : "nav"}
+                      aria-current={activePage === item.id ? "page" : undefined}
+                      onClick={() => {
+                        setActivePage(item.id);
+                        setIsMobileNavOpen(false);
+                      }}
+                    >
+                      {item.icon}
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
             ))}
           </nav>
 
           <div className="sidebar-actions">
-            <button type="button" className="secondary full" onClick={exportBackup}>
+            <div className={`sidebar-sync ${syncTone}`} role="status" aria-live="polite" title={syncStatus}>
+              <SyncIcon size={15} className={isSyncing ? "spin" : undefined} />
+              <div>
+                <strong>{saveError || status}</strong>
+                {lastSavedAt && !saveError && <time>Salvo {lastSavedAt}</time>}
+              </div>
+            </div>
+            <button type="button" className="sidebar-action" onClick={exportBackup}>
               <Download size={16} /> Exportar backup
             </button>
 
             <button
               type="button"
-              className="secondary full file-label"
+              className="sidebar-action file-label"
               onClick={() => backupInputRef.current?.click()}
             >
               <FileUp size={16} /> Importar backup
@@ -394,7 +405,7 @@ export function App() {
 
             {userId && (
               <button
-                className="secondary full mobile-menu-logout"
+                className="sidebar-action sidebar-logout"
                 onClick={handleLogout}
                 disabled={logoutLoading}
               >
@@ -409,12 +420,6 @@ export function App() {
         <header className="topbar">
           <div className="page-heading">
             <h1>{navItems.find((item) => item.id === activePage)?.label}</h1>
-            <p className="page-description">{pageDescriptions[activePage]}</p>
-            <div className={`sync-status ${syncTone}`} role="status" aria-live="polite" title={syncStatus}>
-              <SyncIcon size={14} className={isSyncing ? "spin" : undefined} />
-              <span>{saveError || status}</span>
-              {lastSavedAt && !saveError && <time>Salvo {lastSavedAt}</time>}
-            </div>
           </div>
         <div className="topbar-actions">
           <label className="field compact">
@@ -426,15 +431,6 @@ export function App() {
             />
           </label>
 
-          {userId && (
-            <button
-              className="secondary mobile-topbar-logout"
-              onClick={handleLogout}
-              disabled={logoutLoading}
-            >
-              <LogOut size={16} /> {logoutLoading ? "Saindo..." : "Sair"}
-            </button>
-          )}
         </div>
         </header>
 
