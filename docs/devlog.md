@@ -151,3 +151,17 @@ Changed files:
 -  M src/index.css
 -  M src/pages/Dashboard.tsx
 -  M tests/e2e/mobile.spec.ts
+
+## 2026-07-16 11:03
+- fix: persist transaction deletions
+
+Changed files:
+-  M src/App.remote.test.tsx
+-  M src/App.test.tsx
+-  M src/App.tsx
+-  M src/AuthScreen.test.tsx
+-  M src/lib/storage.test.ts
+-  M src/lib/storage.ts
+-  M src/pages/TransactionsPage.tsx
+-  M tests/e2e/remote.spec.ts
+-  M tests/e2e/support/supabaseMock.ts

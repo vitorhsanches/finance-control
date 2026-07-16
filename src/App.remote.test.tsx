@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   saveLocalState: vi.fn(),
   loadRemoteState: vi.fn(),
   saveRemoteState: vi.fn(),
+  deleteRemoteTransaction: vi.fn(),
   loadProfile: vi.fn(),
   signOut: vi.fn(),
   getSession: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock('./lib/storage', () => ({
   saveLocalState: mocks.saveLocalState,
   loadRemoteState: mocks.loadRemoteState,
   saveRemoteState: mocks.saveRemoteState,
+  deleteRemoteTransaction: mocks.deleteRemoteTransaction,
   loadProfile: mocks.loadProfile,
   saveProfile: vi.fn(),
   getSession: vi.fn(),
@@ -58,15 +60,17 @@ beforeEach(() => {
   mocks.loadRemoteState.mockResolvedValue(state);
   mocks.loadProfile.mockResolvedValue({ displayName: 'Ana' });
   mocks.saveRemoteState.mockResolvedValue(undefined);
+  mocks.deleteRemoteTransaction.mockResolvedValue(undefined);
   mocks.getSession.mockResolvedValue({ data: { session: { user } } });
   mocks.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } });
   mocks.signOut.mockResolvedValue({ error: null });
 });
 
 async function renderRemoteApp() {
-  render(<App />);
+  const result = render(<App />);
   expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
   await waitFor(() => expect(mocks.loadRemoteState).toHaveBeenCalledWith('user-1'));
+  return result;
 }
 
 describe('remote application lifecycle', () => {
@@ -119,5 +123,45 @@ describe('remote application lifecycle', () => {
     expect(order[order.length - 1]).toBe('signOut');
     expect(order.slice(0, -1)).not.toHaveLength(0);
     expect(order.slice(0, -1).every((step) => step === 'save')).toBe(true);
+  });
+
+  it('deletes a remote transaction before removing it locally and it stays absent after reload', async () => {
+    const interaction = userEvent.setup();
+    const remoteState = emptyState();
+    remoteState.settings.selectedMonth = '2026-07';
+    remoteState.transactions = [{ id: 't1', date: '2026-07-10', description: 'Mercado remoto', type: 'expense', category: 'Casa', amount: 25, paymentMethod: 'Pix', accountOrCard: 'Conta', essential: true, paid: true }];
+    mocks.loadRemoteState.mockResolvedValue(remoteState);
+
+    const firstRender = await renderRemoteApp();
+    await interaction.click(screen.getByRole('button', { name: 'Lançamentos' }));
+    expect(screen.getByDisplayValue('Mercado remoto')).toBeInTheDocument();
+    await interaction.click(screen.getByRole('button', { name: 'Excluir lançamento Mercado remoto' }));
+
+    await waitFor(() => expect(mocks.deleteRemoteTransaction).toHaveBeenCalledWith('user-1', 't1'));
+    await waitFor(() => expect(screen.queryByDisplayValue('Mercado remoto')).not.toBeInTheDocument());
+
+    firstRender.unmount();
+    const reloadedState = emptyState();
+    reloadedState.settings.selectedMonth = '2026-07';
+    mocks.loadRemoteState.mockResolvedValue(reloadedState);
+    await renderRemoteApp();
+    await interaction.click(screen.getByRole('button', { name: 'Lançamentos' }));
+    expect(screen.queryByDisplayValue('Mercado remoto')).not.toBeInTheDocument();
+  });
+
+  it('keeps a transaction visible when its remote delete fails', async () => {
+    const interaction = userEvent.setup();
+    const remoteState = emptyState();
+    remoteState.settings.selectedMonth = '2026-07';
+    remoteState.transactions = [{ id: 't1', date: '2026-07-10', description: 'Não apagar', type: 'expense', category: 'Casa', amount: 25, paymentMethod: 'Pix', accountOrCard: 'Conta', essential: true, paid: true }];
+    mocks.loadRemoteState.mockResolvedValue(remoteState);
+    mocks.deleteRemoteTransaction.mockRejectedValue(new Error('delete unavailable'));
+
+    await renderRemoteApp();
+    await interaction.click(screen.getByRole('button', { name: 'Lançamentos' }));
+    await interaction.click(screen.getByRole('button', { name: 'Excluir lançamento Não apagar' }));
+
+    expect(await screen.findByText('delete unavailable')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Não apagar')).toBeInTheDocument();
   });
 });

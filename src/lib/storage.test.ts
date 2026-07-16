@@ -106,4 +106,47 @@ describe('remote storage', () => {
     await expect(storage.saveRemoteState('user-1', state)).rejects.toThrow('upsert failed');
     await expect(storage.saveRemoteState('user-1', state)).resolves.toBeUndefined();
   });
+
+  it('deletes only the transaction matching both user_id and id and it stays deleted after reload', async () => {
+    const remoteTransactions = [
+      { user_id: 'user-1', id: 'shared-id', date: '2026-07-10', description: 'User one', type: 'expense', category: 'Casa', amount: 10, payment_method: 'Pix', account_or_card: 'Conta', essential: false, paid: true },
+      { user_id: 'user-2', id: 'shared-id', date: '2026-07-10', description: 'User two', type: 'expense', category: 'Casa', amount: 20, payment_method: 'Pix', account_or_card: 'Conta', essential: false, paid: true },
+    ];
+    mock.setResolver((call) => {
+      if (call.table === 'app_settings') {
+        return { data: { currency: 'BRL', selected_month: '2026-07' }, error: null };
+      }
+      if (call.table === 'transactions' && call.operation === 'delete') {
+        const userId = call.filters.find(([column]) => column === 'user_id')?.[1];
+        const transactionId = call.filters.find(([column]) => column === 'id')?.[1];
+        const index = remoteTransactions.findIndex((row) => row.user_id === userId && row.id === transactionId);
+        if (index >= 0) remoteTransactions.splice(index, 1);
+        return { data: null, error: null };
+      }
+      if (call.table === 'transactions') {
+        const userId = call.filters.find(([column]) => column === 'user_id')?.[1];
+        return { data: remoteTransactions.filter((row) => row.user_id === userId), error: null };
+      }
+      return { data: [], error: null, count: 0 };
+    });
+
+    expect((await storage.loadRemoteState('user-1')).transactions).toHaveLength(1);
+    await storage.deleteRemoteTransaction('user-1', 'shared-id');
+    expect((await storage.loadRemoteState('user-1')).transactions).toHaveLength(0);
+    expect((await storage.loadRemoteState('user-2')).transactions).toHaveLength(1);
+
+    const deleteCall = mock.calls.find((call) => call.table === 'transactions' && call.operation === 'delete');
+    expect(deleteCall?.filters).toEqual([['user_id', 'user-1'], ['id', 'shared-id']]);
+    expect(mock.calls.filter((call) => call.table === 'transactions' && call.operation === 'delete')).toHaveLength(1);
+  });
+
+  it('propagates transaction delete errors without issuing a broad delete', async () => {
+    mock.setResolver((call) => call.table === 'transactions' && call.operation === 'delete'
+      ? { error: new Error('delete failed') }
+      : { data: [], error: null, count: 0 });
+
+    await expect(storage.deleteRemoteTransaction('user-1', 't1')).rejects.toThrow('delete failed');
+    const deleteCall = mock.calls.find((call) => call.operation === 'delete');
+    expect(deleteCall?.filters).toEqual([['user_id', 'user-1'], ['id', 't1']]);
+  });
 });

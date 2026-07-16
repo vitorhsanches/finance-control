@@ -16,6 +16,7 @@ vi.mock('./lib/storage', () => ({
   saveLocalState: mocks.saveLocalState,
   loadRemoteState: vi.fn(),
   saveRemoteState: vi.fn(),
+  deleteRemoteTransaction: vi.fn(),
   loadProfile: vi.fn(),
   saveProfile: vi.fn(),
   getSession: vi.fn(),
@@ -107,6 +108,14 @@ describe('application flows', () => {
     await user.selectOptions(screen.getByLabelText('Categoria'), 'Todos');
     await user.click(screen.getByRole('button', { name: 'Adicionar' }));
     expect(screen.getByDisplayValue('Novo lançamento')).toBeInTheDocument();
+  });
+
+  it('keeps transaction deletion working in local mode', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: 'Lançamentos' }));
+    await user.click(screen.getByRole('button', { name: 'Excluir lançamento Mercado mensal' }));
+    expect(screen.queryByDisplayValue('Mercado mensal')).not.toBeInTheDocument();
   });
 
   it('shows useful empty states on a new account', () => {

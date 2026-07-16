@@ -201,6 +201,25 @@ export function saveRemoteState(userId: string, state: FinanceState): Promise<vo
   return queuedSave;
 }
 
+export function deleteRemoteTransaction(userId: string, transactionId: string): Promise<void> {
+  if (!supabase) return Promise.resolve();
+  const client = supabase;
+
+  const queuedDelete = remoteSaveQueue.then(async () => {
+    await throwIfError(
+      client
+        .from('transactions')
+        .delete()
+        .eq('user_id', userId)
+        .eq('id', transactionId)
+    );
+  });
+
+  remoteSaveQueue = queuedDelete.catch(() => undefined);
+
+  return queuedDelete;
+}
+
 async function persistRemoteState(userId: string, state: FinanceState) {
   if (!supabase) return;
   const normalized = normalizeState(state);

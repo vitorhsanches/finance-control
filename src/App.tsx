@@ -7,7 +7,7 @@ import type { FinanceState, PageKey } from "./types";
 import { emptyState, normalizeState } from "./data/sample";
 import {
   isSupabaseConfigured, loadLocalState, loadProfile, loadRemoteState,
-  saveLocalState, saveProfile, saveRemoteState, supabase,
+  deleteRemoteTransaction, saveLocalState, saveProfile, saveRemoteState, supabase,
 } from "./lib/storage";
 import { currentMonth } from "./lib/utils";
 import { BudgetsPage } from "./pages/BudgetsPage";
@@ -209,6 +209,42 @@ export function App() {
       setState((prev) => normalizeState(updater(prev))),
     [],
   );
+
+  const removeTransaction = useCallback(async (transactionId: string) => {
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+
+    try {
+      if (supabase && userId && remoteReady) {
+        setStatus("Excluindo lançamento...");
+        setSaveError(null);
+        await deleteRemoteTransaction(userId, transactionId);
+      }
+
+      updateState((previous) => ({
+        ...previous,
+        transactions: previous.transactions.filter(
+          (transaction) => transaction.id !== transactionId,
+        ),
+      }));
+
+      if (supabase && userId && remoteReady) {
+        setLastSavedAt(formatSaveTime());
+        setStatus("Online Supabase");
+      }
+    } catch (error) {
+      console.error(error);
+      setSaveError(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível excluir o lançamento online.",
+      );
+      setStatus("Erro ao excluir lançamento");
+      throw error;
+    }
+  }, [remoteReady, updateState, userId]);
 
   const setSelectedMonth = useCallback((month: string) => {
     updateState((prev) => ({
@@ -448,6 +484,7 @@ export function App() {
               state={state}
               updateState={updateState}
               month={selectedMonth}
+              onDeleteTransaction={removeTransaction}
             />
           )}
           {activePage === "import" && (

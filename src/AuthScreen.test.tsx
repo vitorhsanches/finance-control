@@ -11,6 +11,7 @@ vi.mock('./lib/storage', () => ({
   saveLocalState: vi.fn(),
   loadRemoteState: vi.fn(),
   saveRemoteState: vi.fn(),
+  deleteRemoteTransaction: vi.fn(),
   loadProfile: vi.fn(),
   saveProfile: vi.fn(),
   getSession: vi.fn()

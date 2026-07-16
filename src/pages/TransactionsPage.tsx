@@ -9,7 +9,8 @@ export function TransactionsPage({
   state,
   updateState,
   month,
-}: PageProps & { month: string }) {
+  onDeleteTransaction,
+}: PageProps & { month: string; onDeleteTransaction: (transactionId: string) => Promise<void> }) {
   const [category, setCategory] = useState("Todos");
   const [type, setType] = useState("Todos");
   const [pendingDateChanges, setPendingDateChanges] = useState<Record<string, string>>({});
@@ -140,11 +141,13 @@ export function TransactionsPage({
     });
   };
 
-  const remove = (id: string) =>
-    updateState((prev) => ({
-      ...prev,
-      transactions: prev.transactions.filter((t) => t.id !== id),
-    }));
+  const remove = async (id: string) => {
+    try {
+      await onDeleteTransaction(id);
+    } catch {
+      // The app shell keeps the transaction visible and reports the remote error.
+    }
+  };
 
   return (
     <Panel
@@ -303,7 +306,7 @@ export function TransactionsPage({
                     className="icon danger"
                     aria-label={`Excluir lançamento ${t.description}`}
                     title="Excluir lançamento"
-                    onClick={() => remove(t.id)}
+                    onClick={() => void remove(t.id)}
                   >
                     <Trash2 size={15} />
                   </button>

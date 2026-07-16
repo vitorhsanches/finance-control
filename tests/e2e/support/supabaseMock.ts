@@ -37,11 +37,24 @@ const settings = {
 
 export async function mockSupabase(page: Page, options: MockOptions = {}) {
   const requests: Array<{ method: string; url: string }> = [];
+  const transactions = [{
+    user_id: user.id,
+    id: "remote-t1",
+    date: "2026-07-10",
+    description: "Transação remota E2E",
+    type: "expense",
+    category: "Alimentação",
+    amount: 25,
+    payment_method: "Pix",
+    account_or_card: "Conta E2E",
+    essential: false,
+    paid: true,
+  }];
 
   await page.route("**/__supabase/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    requests.push({ method: request.method(), url: url.pathname });
+    requests.push({ method: request.method(), url: `${url.pathname}${url.search}` });
 
     if (url.pathname.endsWith("/auth/v1/token")) {
       const credentials = request.postDataJSON() as { email?: string } | null;
@@ -64,7 +77,7 @@ export async function mockSupabase(page: Page, options: MockOptions = {}) {
     }
 
     if (url.pathname.includes("/rest/v1/")) {
-      await handleRest(route, url, options.writeDelay || 0);
+      await handleRest(route, url, options.writeDelay || 0, transactions);
       return;
     }
 
@@ -74,7 +87,7 @@ export async function mockSupabase(page: Page, options: MockOptions = {}) {
   return { requests };
 }
 
-async function handleRest(route: Route, url: URL, writeDelay: number) {
+async function handleRest(route: Route, url: URL, writeDelay: number, transactions: Array<Record<string, unknown>>) {
   const request = route.request();
   const table = url.pathname.split("/rest/v1/")[1];
 
@@ -84,6 +97,15 @@ async function handleRest(route: Route, url: URL, writeDelay: number) {
   }
 
   if (request.method() !== "GET") {
+    if (request.method() === "DELETE" && table === "transactions") {
+      const userFilter = url.searchParams.get("user_id");
+      const idFilter = url.searchParams.get("id");
+      if (userFilter === `eq.${user.id}` && idFilter) {
+        const transactionId = idFilter.replace(/^eq\./, "");
+        const index = transactions.findIndex((transaction) => transaction.user_id === user.id && transaction.id === transactionId);
+        if (index >= 0) transactions.splice(index, 1);
+      }
+    }
     if (writeDelay && table === "app_settings") {
       await new Promise((resolve) => setTimeout(resolve, writeDelay));
     }
@@ -109,6 +131,8 @@ async function handleRest(route: Route, url: URL, writeDelay: number) {
     await json(route, [{ name: "Pix", sort_order: 0 }]);
   } else if (table === "card_rules") {
     await json(route, [{ card_name: "Cartão E2E", closing_day: 5, due_day: 12 }]);
+  } else if (table === "transactions") {
+    await json(route, transactions);
   } else {
     await json(route, []);
   }

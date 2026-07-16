@@ -37,6 +37,27 @@ test("shows autosave feedback and logs out after remote persistence", async ({ p
   const logoutButtons = page.getByRole("button", { name: "Sair" });
   await logoutButtons.last().click();
   await expect(page.getByRole("heading", { name: "Entrar" })).toBeVisible();
-  expect(supabase.requests.some((request) => request.url.endsWith("/auth/v1/logout"))).toBe(true);
+  expect(supabase.requests.some((request) => request.url.includes("/auth/v1/logout"))).toBe(true);
   expect(supabase.requests.some((request) => request.method !== "GET" && request.url.includes("/rest/v1/"))).toBe(true);
+});
+
+test("persists a transaction deletion across reload with both ownership filters", async ({ page }) => {
+  const supabase = await mockSupabase(page);
+  await page.goto("/");
+  await logIn(page);
+
+  await page.getByRole("button", { name: "Lançamentos" }).click();
+  const deleteButton = page.getByRole("button", { name: "Excluir lançamento Transação remota E2E" });
+  await expect(deleteButton).toBeVisible();
+  await deleteButton.click();
+  await expect(deleteButton).toHaveCount(0);
+
+  const deleteRequest = supabase.requests.find((request) => request.method === "DELETE" && request.url.includes("/rest/v1/transactions"));
+  expect(deleteRequest?.url).toContain("user_id=eq.e2e-user");
+  expect(deleteRequest?.url).toContain("id=eq.remote-t1");
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Dashboard", level: 1 })).toBeVisible();
+  await page.getByRole("button", { name: "Lançamentos" }).click();
+  await expect(page.getByRole("button", { name: "Excluir lançamento Transação remota E2E" })).toHaveCount(0);
 });
