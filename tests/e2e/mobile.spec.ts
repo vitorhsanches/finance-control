@@ -13,3 +13,17 @@ test("opens the mobile navigation and reaches a lazy-loaded page", async ({ page
   await expect(page.getByRole("heading", { name: "Contas futuras", level: 1 })).toBeVisible();
   await expect(page.getByRole("button", { name: "Abrir menu" })).toBeVisible();
 });
+
+test("renders the financial summary without horizontal overflow", async ({ page }) => {
+  await page.goto("/");
+  const summary = page.getByRole("region", { name: "Disponível no mês" });
+  await expect(summary).toBeVisible();
+  await expect(summary.getByText("Receitas")).toBeVisible();
+  await expect(summary.getByText("Gastos")).toBeVisible();
+  await expect(summary.getByText("Compromissos futuros")).toBeVisible();
+
+  const hasHorizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+  expect(hasHorizontalOverflow).toBe(false);
+});

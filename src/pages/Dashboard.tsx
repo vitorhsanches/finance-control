@@ -12,7 +12,7 @@ import {
   type FinancialInsightFact,
 } from "../lib/financialInsights";
 import { addMonths, formatDate, money, toNumber, ym } from "../lib/utils";
-import { Empty, MetricCard, Panel, StatusBadge } from "../components/ui";
+import { Empty, Panel, StatusBadge } from "../components/ui";
 
 const COLORS = [
   "#2563eb", "#16a34a", "#f59e0b", "#ef4444",
@@ -86,102 +86,52 @@ export function Dashboard({
           </p>
         </Panel>
       </div>
-      <div className="dashboard-metrics">
-        <section className="dashboard-mobile-summary">
-          <div className="dashboard-mobile-summary-head">
-            <div>
-              <span>Resumo do mês</span>
-              <strong>{money(metrics.safeToSpend, state)}</strong>
-            </div>
-
-            <span
-              className={
-                metrics.safeToSpend >= 0
-                  ? "dashboard-mobile-status good"
-                  : "dashboard-mobile-status bad"
-              }
-            >
-              {metrics.safeToSpend >= 0 ? "Livre" : "Atenção"}
-            </span>
+      <section className="dashboard-hero" aria-labelledby="dashboard-month-summary">
+        <div className="dashboard-hero-primary">
+          <span className="dashboard-eyebrow" id="dashboard-month-summary">Disponível no mês</span>
+          <strong className={metrics.safeToSpend >= 0 ? "amount-positive" : "amount-negative"}>
+            {money(metrics.safeToSpend, state)}
+          </strong>
+          <span className={`dashboard-hero-status ${metrics.safeToSpend >= 0 ? "good" : "bad"}`}>
+            {metrics.safeToSpend >= 0 ? "Dentro do planejado" : "Requer atenção"}
+          </span>
+        </div>
+        <dl className="dashboard-hero-breakdown">
+          <div>
+            <dt>Receitas</dt>
+            <dd className="amount-positive">{money(metrics.monthIncome, state)}</dd>
           </div>
-
-          <div className="dashboard-mobile-summary-grid">
-            <div>
-              <span>Receitas</span>
-              <strong className="amount-positive">
-                {money(metrics.monthIncome, state)}
-              </strong>
-            </div>
-
-            <div>
-              <span>Gastos</span>
-              <strong className="amount-negative">
-                {money(metrics.monthExpenses, state)}
-              </strong>
-            </div>
-
-            <div>
-              <span>Contas futuras</span>
-              <strong>{money(metrics.pendingBillsMonth, state)}</strong>
-            </div>
-
-            <div>
-              <span>Parcelas</span>
-              <strong>{money(metrics.installmentsMonth, state)}</strong>
-            </div>
+          <div>
+            <dt>Gastos</dt>
+            <dd className={metrics.monthExpenses > 0 ? "amount-negative" : "amount-neutral"}>{money(metrics.monthExpenses, state)}</dd>
           </div>
-        </section>
+          <div>
+            <dt>Compromissos futuros</dt>
+            <dd className={metrics.pendingBillsMonth > 0 ? "amount-warning" : "amount-neutral"}>{money(metrics.pendingBillsMonth, state)}</dd>
+            <small>Parcelas: {money(metrics.installmentsMonth, state)}</small>
+          </div>
+        </dl>
+      </section>
 
-        <section className="cards-grid dashboard-desktop-metrics">
-          <MetricCard
-            label="Receitas do mês"
-            value={money(metrics.monthIncome, state)}
-            tone="good"
-          />
+      <section className="dashboard-compact-metrics" aria-label="Métricas financeiras do mês">
+        {[
+          ["Entradas", metrics.monthIncome, "good"],
+          ["Saídas", metrics.monthExpenses, metrics.monthExpenses > 0 ? "bad" : "neutral"],
+          ["Saldo disponível", metrics.availableBalance, metrics.availableBalance >= 0 ? "good" : "bad"],
+          ["Economia planejada", state.settings.monthlySavingGoal, "neutral"],
+        ].map(([label, value, tone]) => (
+          <div className={`dashboard-compact-metric ${tone}`} key={String(label)}>
+            <span>{label}</span>
+            <strong>{money(Number(value), state)}</strong>
+          </div>
+        ))}
+      </section>
 
-          <MetricCard
-            label="Gastos lançados"
-            value={money(metrics.monthExpenses, state)}
-            tone={metrics.monthExpenses > 0 ? "bad" : "neutral"}
-          />
-
-          <MetricCard
-            label="Contas futuras do mês"
-            value={money(metrics.pendingBillsMonth, state)}
-            tone={metrics.pendingBillsMonth > 0 ? "warn" : "good"}
-          />
-
-          <MetricCard
-            label="Parcelas do mês"
-            value={money(metrics.installmentsMonth, state)}
-            tone={metrics.installmentsMonth > 0 ? "warn" : "good"}
-          />
-
-          <MetricCard
-            label="Previsão livre do mês"
-            value={money(metrics.safeToSpend, state)}
-            tone={metrics.safeToSpend >= 0 ? "good" : "bad"}
-          />
-
-          <MetricCard
-            label="Investimentos"
-            value={money(metrics.investments, state)}
-            tone="good"
-          />
-
-          <MetricCard
-            label="Parcelas abertas"
-            value={money(metrics.openInstallments, state)}
-            tone={metrics.openInstallments > 0 ? "warn" : "good"}
-          />
-
-          <MetricCard
-            label="Patrimônio líquido"
-            value={money(metrics.netWorth, state)}
-            tone={metrics.netWorth >= 0 ? "good" : "bad"}
-          />
-        </section>
-      </div>
+      <dl className="dashboard-context-metrics" aria-label="Posição financeira geral">
+        <div><dt>Investimentos</dt><dd>{money(metrics.investments, state)}</dd></div>
+        <div><dt>Parcelas abertas</dt><dd>{money(metrics.openInstallments, state)}</dd></div>
+        <div><dt>Patrimônio líquido</dt><dd className={metrics.netWorth >= 0 ? "amount-positive" : "amount-negative"}>{money(metrics.netWorth, state)}</dd></div>
+      </dl>
 
       <Panel
         title="Insights financeiros"
@@ -357,12 +307,14 @@ export function Dashboard({
       <section className="grid-2">
         <Panel title="Gastos por categoria">
           {categoryData.length ? (
-            <ResponsiveContainer width="100%" height={260}>
+            <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
                   dataKey="value"
                   data={categoryData}
-                  label={({ value }) => money(Number(value), state)}
+                  innerRadius="48%"
+                  outerRadius="78%"
+                  paddingAngle={2}
                 >
                   {categoryData.map((_entry, i) => (
                     <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -377,9 +329,9 @@ export function Dashboard({
         </Panel>
         <Panel title="Evolução mensal">
           <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={evolution}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
+            <AreaChart data={evolution} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+              <CartesianGrid stroke="#e2e8f0" strokeDasharray="4 4" vertical={false} />
+              <XAxis dataKey="month" axisLine={false} tickLine={false} />
               <YAxis
                 tickFormatter={(value) =>
                   Number(value).toLocaleString("pt-BR", {
@@ -388,8 +340,8 @@ export function Dashboard({
                 }
               />
               <Tooltip formatter={(v) => money(Number(v), state)} />
-              <Area dataKey="receitas" />
-              <Area dataKey="despesas" />
+              <Area name="Receitas" type="monotone" dataKey="receitas" stroke="#059669" fill="#d1fae5" strokeWidth={2.5} />
+              <Area name="Despesas" type="monotone" dataKey="despesas" stroke="#dc2626" fill="#fee2e2" strokeWidth={2.5} />
             </AreaChart>
           </ResponsiveContainer>
         </Panel>

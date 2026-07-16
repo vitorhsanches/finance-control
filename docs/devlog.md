@@ -142,3 +142,12 @@ Changed files:
 -  M src/App.test.tsx
 -  M src/App.tsx
 -  M src/index.css
+
+## 2026-07-16 10:04
+- style: modernize dashboard financial overview
+
+Changed files:
+-  M src/App.test.tsx
+-  M src/index.css
+-  M src/pages/Dashboard.tsx
+-  M tests/e2e/mobile.spec.ts
