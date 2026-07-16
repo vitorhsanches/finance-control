@@ -177,3 +177,14 @@ Changed files:
 -  M tests/e2e/local.spec.ts
 -  M tests/e2e/mobile.spec.ts
 -  M tests/e2e/remote.spec.ts
+
+## 2026-07-16 11:29
+- style: modernize staged import workflow
+
+Changed files:
+-  M src/App.test.tsx
+-  M src/App.tsx
+-  M src/index.css
+-  M src/pages/ImportPage.tsx
+-  M tests/e2e/local.spec.ts
+-  M tests/e2e/mobile.spec.ts

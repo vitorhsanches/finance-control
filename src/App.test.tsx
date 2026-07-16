@@ -225,14 +225,24 @@ describe('application flows', () => {
 
     const file = new File(['Quando;Texto;Quantia\n10/07/2026;Padaria;-25,50'], 'custom.csv', { type: 'text/csv' });
     await user.upload(screen.getByLabelText(/Selecionar arquivos/), file);
-    expect(await screen.findByRole('heading', { name: /Mapear CSV desconhecido/ })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /2\. Mapear custom\.csv/ })).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText('Coluna de data'), 'Quando');
-    await user.selectOptions(screen.getByLabelText('Coluna de descrição'), 'Texto');
-    await user.selectOptions(screen.getByLabelText('Coluna de valor'), 'Quantia');
-    await user.click(screen.getByRole('button', { name: 'Gerar prévia' }));
-    expect(await screen.findByRole('heading', { name: 'Prévia da importação' })).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText(/Coluna de data/), 'Quando');
+    await user.selectOptions(screen.getByLabelText(/Coluna de descrição/), 'Texto');
+    await user.selectOptions(screen.getByLabelText(/Coluna de valor/), 'Quantia');
+    await user.type(screen.getByLabelText('Nome do perfil'), 'Meu banco');
+    await user.click(screen.getByRole('button', { name: 'Salvar perfil' }));
+    await user.click(screen.getByRole('button', { name: 'Revisar importação' }));
+    expect(await screen.findByRole('heading', { name: '3. Revise antes de importar' })).toBeInTheDocument();
     expect(screen.getByDisplayValue('Padaria')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Voltar ao mapeamento' }));
+    expect(screen.getByLabelText(/Coluna de data/)).toHaveValue('Quando');
+    await user.click(screen.getByRole('button', { name: 'Revisar importação' }));
+    await user.dblClick(screen.getByRole('button', { name: /Confirmar 1 lançamento/ }));
+    expect(await screen.findByRole('heading', { name: '4. Importação concluída' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Importar outro arquivo' }));
+    await user.upload(screen.getByLabelText(/Selecionar arquivos/), new File(['Quando;Texto;Quantia\n11/07/2026;Mercado;-50,00'], 'again.csv', { type: 'text/csv' }));
+    expect(await screen.findByLabelText('Perfil salvo')).toHaveDisplayValue('Meu banco');
   });
 
   it('announces import loading and reports importer errors', async () => {

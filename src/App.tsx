@@ -488,7 +488,11 @@ export function App() {
             />
           )}
           {activePage === "import" && (
-            <ImportPage state={state} updateState={updateState} />
+            <ImportPage
+              state={state}
+              updateState={updateState}
+              onGoToTransactions={() => setActivePage("transactions")}
+            />
           )}
           {activePage === "installments" && (
             <InstallmentsPage

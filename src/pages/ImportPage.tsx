@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { FileUp } from "lucide-react";
 import type { ImportProfile, ImportResult, Transaction } from "../types";
 import { getInstallmentsForMonth } from "../lib/calculations";
@@ -10,9 +10,22 @@ import {
 import { Panel } from "../components/ui";
 import type { PageProps } from "./types";
 
-export function ImportPage({ state, updateState }: PageProps) {
+type ImportStep = "file" | "mapping" | "review" | "result";
+
+type ImportPageProps = PageProps & { onGoToTransactions?: () => void };
+
+export function ImportPage({ state, updateState, onGoToTransactions }: ImportPageProps) {
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [automaticResult, setAutomaticResult] = useState<ImportResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState<ImportStep>("file");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState("");
+  const [mappingError, setMappingError] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
+  const [completion, setCompletion] = useState<{ imported: number; ignored: number; duplicates: number; errors: number } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const applyingRef = useRef(false);
   const [genericCsvPreview, setGenericCsvPreview] =
     useState<GenericCsvPreview | null>(null);
   const [selectedImportProfileId, setSelectedImportProfileId] = useState("");
@@ -245,18 +258,23 @@ export function ImportPage({ state, updateState }: PageProps) {
     setGenericCsvProfileName(nextProfile.name);
   };
 
-  const parse = async (files: FileList | null) => {
-    if (!files?.length) return;
+  const parse = async (files: FileList | File[] | null) => {
+    if (!files?.length || loading) return;
 
     setLoading(true);
+    setFileError("");
+    setMappingError("");
+    setCompletion(null);
     setGenericCsvPreview(null);
 
     try {
       const fileArray = [...files];
+      setSelectedFiles(fileArray);
       const parsed = await parseFinanceFiles(fileArray, state);
       const unknownCsvPreviews = await getUnknownCsvPreviews(fileArray);
 
       setResult(parsed);
+      setAutomaticResult(parsed);
 
       if (unknownCsvPreviews.length > 0) {
         const preview = unknownCsvPreviews[0];
@@ -269,6 +287,7 @@ export function ImportPage({ state, updateState }: PageProps) {
         );
 
         setGenericCsvPreview(preview);
+        setStep("mapping");
 
         if (matchedProfile) {
           setSelectedImportProfileId(matchedProfile.id);
@@ -284,15 +303,17 @@ export function ImportPage({ state, updateState }: PageProps) {
           setGenericCsvProfileName("");
           setGenericCsvMapping(createDefaultGenericCsvMapping(preview));
         }
+      } else {
+        setStep("review");
       }
 
     } catch (error) {
       console.error(error);
-      alert(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível importar o arquivo."
-      );
+      const message = error instanceof Error
+        ? error.message
+        : "Não foi possível importar o arquivo.";
+      setFileError(message);
+      alert(message);
     } finally {
       setLoading(false);
     }
@@ -523,14 +544,19 @@ export function ImportPage({ state, updateState }: PageProps) {
   const applyGenericCsvMapping = () => {
     if (!genericCsvPreview) return;
 
+    if (!genericCsvMapping.dateColumn || !genericCsvMapping.descriptionColumn || !genericCsvMapping.amountColumn) {
+      setMappingError("Selecione as colunas obrigatórias de data, descrição e valor.");
+      return;
+    }
+
     const parsed = parseGenericCsvPreview(
       genericCsvPreview,
       genericCsvMapping,
       state
     );
 
-    setResult((prev) => {
-      const current = prev || {
+    setResult(() => {
+      const current = automaticResult || {
         transactions: [],
         ignored: [],
         warnings: [],
@@ -543,11 +569,13 @@ export function ImportPage({ state, updateState }: PageProps) {
       };
     });
 
-    setGenericCsvPreview(null);
+    setMappingError("");
+    setStep("review");
   };
 
   const apply = () => {
-    if (!result) return;
+    if (!result || applyingRef.current) return;
+    applyingRef.current = true;
 
     const validTransactions = result.transactions.filter((t) =>
       /^\d{4}-\d{2}-\d{2}$/.test(t.date || "")
@@ -564,14 +592,31 @@ export function ImportPage({ state, updateState }: PageProps) {
       transactions: [...validTransactions, ...prev.transactions],
     }));
 
-    setResult(null);
+    const duplicates = result.ignored.filter((item) =>
+      slug(item.reason).includes("duplic")
+    ).length;
+    setCompletion({
+      imported: validTransactions.length,
+      ignored: result.ignored.length + result.transactions.length - validTransactions.length,
+      duplicates,
+      errors: result.warnings.length + result.transactions.length - validTransactions.length,
+    });
+    setStep("result");
+    applyingRef.current = false;
   };
 
   const clearPreview = () => {
     setResult(null);
+    setAutomaticResult(null);
     setGenericCsvPreview(null);
+    setSelectedFiles([]);
+    setFileError("");
+    setMappingError("");
+    setCompletion(null);
     setSelectedImportProfileId("");
     setGenericCsvProfileName("");
+    setStep("file");
+    if (inputRef.current) inputRef.current.value = "";
   };
 
     const reconciliationAlerts = result
@@ -603,41 +648,59 @@ export function ImportPage({ state, updateState }: PageProps) {
     : null;
 
   return (
-    <div className="page-stack">
-      <Panel title="Importar arquivos do banco/cartão">
+    <div className="page-stack import-workspace">
+      <nav className="import-steps" aria-label="Etapas da importação">
+        {(["Arquivo", "Mapeamento", "Revisão", "Resultado"] as const).map((label, index) => {
+          const steps: ImportStep[] = ["file", "mapping", "review", "result"];
+          const activeIndex = steps.indexOf(step);
+          return <span key={label} className={index === activeIndex ? "active" : index < activeIndex ? "done" : ""}><b>{index + 1}</b>{label}</span>;
+        })}
+      </nav>
+
+      {step === "file" && <Panel title="1. Escolha os arquivos">
         <p className="muted">
           Selecione CSV ou PDF. Nubank e Caixa continuam com leitura automática.
           Para CSVs de outros bancos, o app abrirá um mapeamento manual de colunas
           antes de gerar a prévia.
         </p>
 
-        <label className="dropzone">
+        <label
+          className={`dropzone ${isDragging ? "dragging" : ""}`}
+          onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={(event) => { event.preventDefault(); setIsDragging(false); void parse([...event.dataTransfer.files]); }}
+        >
           <FileUp />
-          <strong>Selecionar arquivos</strong>
-          <span>CSV ou PDF · múltiplos arquivos</span>
+          <strong>Arraste arquivos aqui ou selecione no computador</strong>
+          <span>CSV ou PDF · Nubank, Caixa e CSV de outros bancos</span>
           <input
+            ref={inputRef}
             hidden
             type="file"
+            aria-label="Selecionar arquivos"
             multiple
             accept=".csv,.pdf,text/csv,application/pdf"
             onChange={(e) => parse(e.target.files)}
           />
         </label>
 
+        {selectedFiles.length > 0 && <div className="import-file-list" aria-label="Arquivos selecionados">
+          {selectedFiles.map((file) => <div key={`${file.name}-${file.size}`}><strong>{file.name}</strong><span>{file.type || "Tipo não informado"} · {(file.size / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} KB</span></div>)}
+          <button className="secondary small" type="button" onClick={() => inputRef.current?.click()}>Trocar arquivo</button>
+        </div>}
         {loading && <div className="notice" role="status" aria-live="polite">Convertendo arquivos...</div>}
-      </Panel>
-      {genericCsvPreview && (
+        {fileError && <div className="notice danger" role="alert">{fileError}</div>}
+      </Panel>}
+      {step === "mapping" && genericCsvPreview && (
       <Panel
-        title={`Mapear CSV desconhecido: ${genericCsvPreview.fileName}`}
+        title={`2. Mapear ${genericCsvPreview.fileName}`}
         action={
           <div className="generic-csv-preview-actions">
             <button
               className="secondary"
               type="button"
               onClick={() => {
-                setGenericCsvPreview(null);
-                setSelectedImportProfileId("");
-                setGenericCsvProfileName("");
+                clearPreview();
               }}
             >
               Ignorar CSV
@@ -656,7 +719,7 @@ export function ImportPage({ state, updateState }: PageProps) {
               type="button"
               onClick={applyGenericCsvMapping}
             >
-              Gerar prévia
+              Revisar importação
             </button>
           </div>
         }
@@ -665,6 +728,7 @@ export function ImportPage({ state, updateState }: PageProps) {
           Este CSV não foi reconhecido automaticamente. Escolha quais colunas
           representam data, descrição e valor.
         </div>
+        {mappingError && <div className="notice danger" role="alert">{mappingError}</div>}
         <div className="import-profile-row">
           <label className="field">
             <span>Perfil salvo</span>
@@ -694,8 +758,8 @@ export function ImportPage({ state, updateState }: PageProps) {
         </div>
 
         <div className="import-mapping-grid">
-          <label className="field">
-            <span>Coluna de data</span>
+          <label className="field required-field">
+            <span>Coluna de data <b>Obrigatório</b></span>
             <select
               value={genericCsvMapping.dateColumn}
               onChange={(e) =>
@@ -711,8 +775,8 @@ export function ImportPage({ state, updateState }: PageProps) {
             </select>
           </label>
 
-          <label className="field">
-            <span>Coluna de descrição</span>
+          <label className="field required-field">
+            <span>Coluna de descrição <b>Obrigatório</b></span>
             <select
               value={genericCsvMapping.descriptionColumn}
               onChange={(e) =>
@@ -728,8 +792,8 @@ export function ImportPage({ state, updateState }: PageProps) {
             </select>
           </label>
 
-          <label className="field">
-            <span>Coluna de valor</span>
+          <label className="field required-field">
+            <span>Coluna de valor <b>Obrigatório</b></span>
             <select
               value={genericCsvMapping.amountColumn}
               onChange={(e) =>
@@ -745,6 +809,9 @@ export function ImportPage({ state, updateState }: PageProps) {
             </select>
           </label>
 
+          <details className="import-advanced">
+            <summary>Opções avançadas</summary>
+            <div className="import-mapping-grid">
           <label className="field">
             <span>Coluna de tipo</span>
             <select
@@ -829,6 +896,8 @@ export function ImportPage({ state, updateState }: PageProps) {
               Valor negativo significa despesa
             </label>
           </label>
+            </div>
+          </details>
         </div>
 
         <p className="muted">
@@ -860,13 +929,16 @@ export function ImportPage({ state, updateState }: PageProps) {
       </Panel>
     )}
 
-      {result && importSummary && (
+      {step === "review" && result && importSummary && (
         <Panel
-          title="Prévia da importação"
+          title="3. Revise antes de importar"
           action={
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="secondary" onClick={clearPreview}>
-                Cancelar prévia
+              {genericCsvPreview && <button className="secondary" type="button" onClick={() => setStep("mapping")}>
+                Voltar ao mapeamento
+              </button>}
+              <button className="secondary" type="button" onClick={clearPreview}>
+                Trocar arquivo
               </button>
 
               <button
@@ -874,7 +946,7 @@ export function ImportPage({ state, updateState }: PageProps) {
                 onClick={apply}
                 disabled={result.transactions.length === 0}
               >
-                Importar {result.transactions.length} lançamentos
+                Confirmar {result.transactions.length} lançamentos
               </button>
             </div>
           }
@@ -884,6 +956,11 @@ export function ImportPage({ state, updateState }: PageProps) {
               {w}
             </div>
           ))}
+
+          {result.ignored.length > 0 && <details className="import-ignored">
+            <summary>Entenda as {result.ignored.length} linhas ignoradas</summary>
+            <ul>{result.ignored.map((item, index) => <li key={`${item.reason}-${index}`}><b>{item.fileName} · item {index + 1}:</b> {item.reason}{item.raw ? <code>{item.raw}</code> : null}</li>)}</ul>
+          </details>}
 
           {importantReconciliationAlerts > 0 && (
             <div className="notice warn">
@@ -905,7 +982,16 @@ export function ImportPage({ state, updateState }: PageProps) {
 
             <strong>{importSummary.ignoredCount}</strong>
             <span>linhas ignoradas</span>
+
+            <strong>{result.ignored.filter((item) => slug(item.reason).includes("duplic")).length}</strong>
+            <span>duplicados</span>
           </div>
+
+          {genericCsvPreview && <div className="import-review-rules">
+            <span><b>Conta/cartão</b>{genericCsvMapping.accountOrCard || "Não informado"}</span>
+            <span><b>Pagamento</b>{genericCsvMapping.paymentMethod}</span>
+            <span><b>Regra de sinal</b>{genericCsvMapping.negativeMeansExpense ? "Negativo é despesa" : "Tipo define receita/despesa"}</span>
+          </div>}
 
           <div className="summary-row">
             <strong>{money(importSummary.incomeTotal, state)}</strong>
@@ -1079,7 +1165,22 @@ export function ImportPage({ state, updateState }: PageProps) {
           )}
         </Panel>
       )}
+
+      {step === "result" && completion && (
+        <Panel title="4. Importação concluída">
+          <div className="import-result" role="status" aria-live="polite">
+            <div><strong>{completion.imported}</strong><span>importados</span></div>
+            <div><strong>{completion.ignored}</strong><span>ignorados</span></div>
+            <div><strong>{completion.duplicates}</strong><span>duplicados</span></div>
+            <div><strong>{completion.errors}</strong><span>erros e avisos</span></div>
+          </div>
+          <p className="muted">A confirmação foi processada uma única vez. Os lançamentos importados já estão disponíveis para revisão.</p>
+          <div className="import-result-actions">
+            <button className="secondary" type="button" onClick={clearPreview}>Importar outro arquivo</button>
+            {onGoToTransactions && <button className="primary" type="button" onClick={onGoToTransactions}>Ir para lançamentos</button>}
+          </div>
+        </Panel>
+      )}
     </div>
   );
 }
-

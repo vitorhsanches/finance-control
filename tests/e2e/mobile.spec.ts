@@ -40,3 +40,21 @@ test("renders transactions as mobile cards without horizontal overflow", async (
   );
   expect(hasHorizontalOverflow).toBe(false);
 });
+
+test("keeps the staged import flow inside the mobile viewport", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Abrir menu" }).click();
+  await page.getByRole("button", { name: "Importar banco/cartão" }).click();
+  await expect(page.getByRole("navigation", { name: "Etapas da importação" })).toBeVisible();
+  await page.getByLabel(/Selecionar arquivos/).setInputFiles({
+    name: "mobile.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Quando;Texto;Quantia\n10/07/2026;Padaria;-25,50"),
+  });
+  await expect(page.getByRole("heading", { name: /2\. Mapear mobile\.csv/ })).toBeVisible();
+
+  const hasHorizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+  expect(hasHorizontalOverflow).toBe(false);
+});

@@ -58,12 +58,12 @@ test("imports a generic CSV through mapping and preview", async ({ page }) => {
     buffer: Buffer.from("Quando;Texto;Quantia\n10/07/2026;Padaria;-25,50"),
   });
 
-  await expect(page.getByRole("heading", { name: /Mapear CSV desconhecido/ })).toBeVisible();
-  await page.getByLabel("Coluna de data").selectOption("Quando");
-  await page.getByLabel("Coluna de descrição").selectOption("Texto");
-  await page.getByLabel("Coluna de valor").selectOption("Quantia");
-  await page.getByRole("button", { name: "Gerar prévia" }).click();
-  await expect(page.getByRole("heading", { name: "Prévia da importação" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /2\. Mapear generic\.csv/ })).toBeVisible();
+  await page.getByLabel(/Coluna de data/).selectOption("Quando");
+  await page.getByLabel(/Coluna de descrição/).selectOption("Texto");
+  await page.getByLabel(/Coluna de valor/).selectOption("Quantia");
+  await page.getByRole("button", { name: "Revisar importação" }).click();
+  await expect(page.getByRole("heading", { name: "3. Revise antes de importar" })).toBeVisible();
   await expect(page.getByRole("row", { name: /Padaria/ })).toBeVisible();
 });
 
