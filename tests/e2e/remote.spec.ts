@@ -49,6 +49,7 @@ test("persists a transaction deletion across reload with both ownership filters"
   await page.getByRole("button", { name: "Lançamentos" }).click();
   const deleteButton = page.getByRole("button", { name: "Excluir lançamento Transação remota E2E" });
   await expect(deleteButton).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
   await deleteButton.click();
   await expect(deleteButton).toHaveCount(0);
 

@@ -64,6 +64,7 @@ beforeEach(() => {
   mocks.getSession.mockResolvedValue({ data: { session: { user } } });
   mocks.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } });
   mocks.signOut.mockResolvedValue({ error: null });
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
 });
 
 async function renderRemoteApp() {
@@ -134,11 +135,11 @@ describe('remote application lifecycle', () => {
 
     const firstRender = await renderRemoteApp();
     await interaction.click(screen.getByRole('button', { name: 'Lançamentos' }));
-    expect(screen.getByDisplayValue('Mercado remoto')).toBeInTheDocument();
+    expect(screen.getByText('Mercado remoto')).toBeInTheDocument();
     await interaction.click(screen.getByRole('button', { name: 'Excluir lançamento Mercado remoto' }));
 
     await waitFor(() => expect(mocks.deleteRemoteTransaction).toHaveBeenCalledWith('user-1', 't1'));
-    await waitFor(() => expect(screen.queryByDisplayValue('Mercado remoto')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('Mercado remoto')).not.toBeInTheDocument());
 
     firstRender.unmount();
     const reloadedState = emptyState();
@@ -146,7 +147,7 @@ describe('remote application lifecycle', () => {
     mocks.loadRemoteState.mockResolvedValue(reloadedState);
     await renderRemoteApp();
     await interaction.click(screen.getByRole('button', { name: 'Lançamentos' }));
-    expect(screen.queryByDisplayValue('Mercado remoto')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mercado remoto')).not.toBeInTheDocument();
   });
 
   it('keeps a transaction visible when its remote delete fails', async () => {
@@ -162,6 +163,6 @@ describe('remote application lifecycle', () => {
     await interaction.click(screen.getByRole('button', { name: 'Excluir lançamento Não apagar' }));
 
     expect(await screen.findByText('delete unavailable')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Não apagar')).toBeInTheDocument();
+    expect(screen.getByText('Não apagar')).toBeInTheDocument();
   });
 });

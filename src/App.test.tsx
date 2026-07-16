@@ -94,28 +94,58 @@ describe('application flows', () => {
     }
   });
 
-  it('filters transactions and supports adding a transaction', async () => {
+  it('filters, clears filters, creates, edits and deletes transactions with confirmation', async () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole('button', { name: 'Lançamentos' }));
 
-    expect(screen.getByDisplayValue('Mercado mensal')).toBeInTheDocument();
-    expect(screen.queryByDisplayValue('Mês anterior')).not.toBeInTheDocument();
+    expect(screen.getByText('Mercado mensal')).toBeInTheDocument();
+    expect(screen.queryByText('Mês anterior')).not.toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText('Categoria'), 'Lazer');
-    expect(screen.getByDisplayValue('Cinema')).toBeInTheDocument();
-    expect(screen.queryByDisplayValue('Mercado mensal')).not.toBeInTheDocument();
+    expect(screen.getByText('Cinema')).toBeInTheDocument();
+    expect(screen.queryByText('Mercado mensal')).not.toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText('Categoria'), 'Todos');
+    await user.type(screen.getByLabelText('Buscar'), 'inexistente');
+    expect(screen.getByText('Nenhum lançamento corresponde aos filtros selecionados.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Limpar' }));
+    expect(screen.getByText('Mercado mensal')).toBeInTheDocument();
+
     await user.click(screen.getByRole('button', { name: 'Adicionar' }));
     expect(screen.getByDisplayValue('Novo lançamento')).toBeInTheDocument();
+    expect(screen.getByText(/Lançamento criado/)).toHaveAttribute('role', 'status');
+    await user.clear(screen.getByLabelText('Descrição de Novo lançamento'));
+    await user.type(screen.getByLabelText('Descrição de Novo lançamento'), 'Café');
+    await user.click(screen.getByRole('button', { name: 'Salvar Novo lançamento' }));
+    expect(screen.getByText('Café')).toBeInTheDocument();
+    expect(screen.getByText(/Alterações salvas/)).toHaveAttribute('role', 'status');
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await user.click(screen.getByRole('button', { name: 'Excluir lançamento Café' }));
+    expect(screen.getByText('Café')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Excluir lançamento Café' }));
+    expect(screen.queryByText('Café')).not.toBeInTheDocument();
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows an empty state when the selected month has no transactions', async () => {
+    const user = userEvent.setup();
+    const state = emptyState();
+    state.settings.selectedMonth = '2026-07';
+    mocks.loadLocalState.mockReturnValue(state);
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Lançamentos' }));
+    expect(screen.getByText('Nenhum lançamento neste mês. Adicione o primeiro para começar.')).toBeInTheDocument();
+    expect(document.querySelector('.transaction-results')).toHaveTextContent('0 de 0 lançamento(s)');
   });
 
   it('keeps transaction deletion working in local mode', async () => {
     const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<App />);
     await user.click(screen.getByRole('button', { name: 'Lançamentos' }));
     await user.click(screen.getByRole('button', { name: 'Excluir lançamento Mercado mensal' }));
-    expect(screen.queryByDisplayValue('Mercado mensal')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mercado mensal')).not.toBeInTheDocument();
   });
 
   it('shows useful empty states on a new account', () => {

@@ -24,16 +24,30 @@ test("starts and navigates across eager and lazy pages with a visible fallback",
   await expect(page.getByRole("heading", { name: "Investimentos", level: 1 })).toBeVisible();
 });
 
-test("adds and filters a transaction", async ({ page }) => {
+test("adds, edits, filters and confirms deletion of a transaction", async ({ page }) => {
   await page.getByRole("button", { name: "Lançamentos" }).click();
   await page.getByRole("button", { name: "Adicionar" }).click();
   const newTransaction = page.getByRole("row", { name: /Novo lançamento/ });
   await expect(newTransaction).toBeVisible();
 
-  await page.getByLabel("Tipo").selectOption("income");
+  const typeFilter = page.locator(".transaction-filters").getByLabel("Tipo");
+  await typeFilter.selectOption("income");
   await expect(newTransaction).toBeHidden();
-  await page.getByLabel("Tipo").selectOption("Todos");
+  await typeFilter.selectOption("Todos");
   await expect(newTransaction).toBeVisible();
+
+  await page.getByLabel("Descrição de Novo lançamento").fill("Café E2E");
+  await page.getByRole("button", { name: "Salvar Novo lançamento" }).click();
+  await expect(page.getByText("Café E2E")).toBeVisible();
+  await expect(page.getByText("Alterações salvas com sucesso.")).toBeVisible();
+
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "Excluir lançamento Café E2E" }).click();
+  await expect(page.getByText("Café E2E")).toBeVisible();
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Excluir lançamento Café E2E" }).click();
+  await expect(page.getByText("Café E2E")).toHaveCount(0);
 });
 
 test("imports a generic CSV through mapping and preview", async ({ page }) => {

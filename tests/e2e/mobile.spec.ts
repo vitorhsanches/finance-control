@@ -27,3 +27,16 @@ test("renders the financial summary without horizontal overflow", async ({ page 
   );
   expect(hasHorizontalOverflow).toBe(false);
 });
+
+test("renders transactions as mobile cards without horizontal overflow", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Abrir menu" }).click();
+  await page.getByRole("button", { name: "Lançamentos" }).click();
+  await expect(page.getByRole("heading", { name: "Lançamentos", level: 1 })).toBeVisible();
+  await expect(page.getByLabel("Filtros de lançamentos")).toBeVisible();
+
+  const hasHorizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+  expect(hasHorizontalOverflow).toBe(false);
+});

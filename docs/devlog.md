@@ -165,3 +165,15 @@ Changed files:
 -  M src/pages/TransactionsPage.tsx
 -  M tests/e2e/remote.spec.ts
 -  M tests/e2e/support/supabaseMock.ts
+
+## 2026-07-16 11:08
+- style: modernize transactions workspace
+
+Changed files:
+-  M src/App.remote.test.tsx
+-  M src/App.test.tsx
+-  M src/index.css
+-  M src/pages/TransactionsPage.tsx
+-  M tests/e2e/local.spec.ts
+-  M tests/e2e/mobile.spec.ts
+-  M tests/e2e/remote.spec.ts
