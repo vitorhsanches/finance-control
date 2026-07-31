@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { emptyState } from '../data/sample';
 import type { FinanceState, FutureBill } from '../types';
 import { BillsPage } from './BillsPage';
@@ -21,14 +21,28 @@ function recurringBill(overrides: Partial<FutureBill> = {}): FutureBill {
   };
 }
 
-function Harness({ bills = [] }: { bills?: FutureBill[] }) {
+function Harness({
+  bills = [],
+  onDeleteFutureBill,
+  onDeleteFutureBillsFrom,
+}: {
+  bills?: FutureBill[];
+  onDeleteFutureBill?: (billId: string) => Promise<void>;
+  onDeleteFutureBillsFrom?: (seriesId: string, occurrenceNumber: number) => Promise<void>;
+}) {
   const initial = emptyState();
   initial.settings.selectedMonth = '2026-07';
   initial.bills = bills;
   const [state, setState] = useState<FinanceState>(initial);
   return (
     <>
-      <BillsPage state={state} updateState={setState} month="2026-07" />
+      <BillsPage
+        state={state}
+        updateState={setState}
+        month="2026-07"
+        onDeleteFutureBill={onDeleteFutureBill}
+        onDeleteFutureBillsFrom={onDeleteFutureBillsFrom}
+      />
       <output data-testid="bills-state">{JSON.stringify(state.bills)}</output>
     </>
   );
@@ -102,5 +116,70 @@ describe('future bill recurrence identity', () => {
     expect(currentBills()[0]).toMatchObject({ recurring: false });
     expect(currentBills()[0]).not.toHaveProperty('seriesId');
     expect(currentBills()[0]).not.toHaveProperty('occurrenceNumber');
+  });
+});
+
+describe('safe recurring future bill deletion', () => {
+  it('deletes a bill without series identity only as an individual occurrence', async () => {
+    const user = userEvent.setup();
+    const deleteOne = vi.fn().mockResolvedValue(undefined);
+    render(<Harness bills={[recurringBill()]} onDeleteFutureBill={deleteOne} />);
+    await user.click(screen.getByRole('button', { name: /Excluir conta futura Internet/ }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(deleteOne).toHaveBeenCalledWith('bill-1');
+  });
+
+  it('defaults to individual deletion and explains that previous occurrences remain', async () => {
+    const user = userEvent.setup();
+    const deleteOne = vi.fn().mockResolvedValue(undefined);
+    render(<Harness bills={[recurringBill({ seriesId: 'series-a', occurrenceNumber: 1 })]} onDeleteFutureBill={deleteOne} />);
+    await user.click(screen.getByRole('button', { name: /Excluir conta futura Internet/ }));
+    expect(screen.getByRole('radio', { name: 'Somente esta ocorrência' })).toBeChecked();
+    expect(screen.getByText(/Ocorrências anteriores não serão removidas/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Excluir' }));
+    expect(deleteOne).toHaveBeenCalledWith('bill-1');
+  });
+
+  it('removes this and later occurrences locally while preserving another identical series', async () => {
+    const user = userEvent.setup();
+    render(<Harness bills={[
+      recurringBill({ id: 'current', seriesId: 'series-a', occurrenceNumber: 1 }),
+      recurringBill({ id: 'next', seriesId: 'series-a', occurrenceNumber: 2 }),
+      recurringBill({ id: 'other', seriesId: 'series-b', occurrenceNumber: 1 }),
+    ]} />);
+    await user.click(screen.getAllByRole('button', { name: /Excluir conta futura Internet/ })[0]);
+    await user.click(screen.getByRole('radio', { name: 'Esta e as próximas' }));
+    await user.click(screen.getByRole('button', { name: 'Excluir' }));
+    expect(currentBills().map((bill) => bill.id)).toEqual(['other']);
+  });
+
+  it('blocks ranged deletion when a previous occurrence could regenerate the series', async () => {
+    const user = userEvent.setup();
+    render(<Harness bills={[
+      recurringBill({ id: 'previous', seriesId: 'series-a', occurrenceNumber: 1 }),
+      recurringBill({ id: 'current', seriesId: 'series-a', occurrenceNumber: 2 }),
+    ]} />);
+    await user.click(screen.getAllByRole('button', { name: /Excluir conta futura Internet/ })[1]);
+    expect(screen.getByRole('radio', { name: 'Esta e as próximas' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/ocorrência anterior poderia recriar a série/i);
+    expect(currentBills()).toHaveLength(2);
+  });
+
+  it('keeps every bill visible when a remote ranged delete fails', async () => {
+    const user = userEvent.setup();
+    const deleteFrom = vi.fn().mockRejectedValue(new Error('remote failure'));
+    render(<Harness
+      bills={[
+        recurringBill({ id: 'current', seriesId: 'series-a', occurrenceNumber: 1 }),
+        recurringBill({ id: 'next', seriesId: 'series-a', occurrenceNumber: 2 }),
+      ]}
+      onDeleteFutureBillsFrom={deleteFrom}
+    />);
+    await user.click(screen.getAllByRole('button', { name: /Excluir conta futura Internet/ })[0]);
+    await user.click(screen.getByRole('radio', { name: 'Esta e as próximas' }));
+    await user.click(screen.getByRole('button', { name: 'Excluir' }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(currentBills()).toHaveLength(2);
+    expect(deleteFrom).toHaveBeenCalledWith('series-a', 1);
   });
 });

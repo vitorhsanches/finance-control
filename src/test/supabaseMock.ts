@@ -37,6 +37,11 @@ class QueryBuilder implements PromiseLike<SupabaseResult> {
     return this;
   }
 
+  gte(column: string, value: unknown) {
+    this.filters.push([`${column}.gte`, value]);
+    return this;
+  }
+
   order(column: string, options?: unknown) {
     this.options = { column, ...((options || {}) as object) };
     return this;

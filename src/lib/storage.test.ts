@@ -178,6 +178,9 @@ describe('remote storage', () => {
       { user_id: 'user-2', id: 'shared-id', due_date: '2026-07-20', description: 'Outro usuário', category: 'Casa', amount: 30, recurring: false, frequency: 'Única', priority: 'Alta', paid: false },
     ];
     mock.setResolver((call) => {
+      if (call.table === 'app_settings') {
+        return { data: { currency: 'BRL', selected_month: '2026-07' }, error: null };
+      }
       if (call.table === 'future_bills' && call.operation === 'delete') {
         const userId = call.filters.find(([column]) => column === 'user_id')?.[1];
         const billId = call.filters.find(([column]) => column === 'id')?.[1];
@@ -211,5 +214,64 @@ describe('remote storage', () => {
     await expect(storage.deleteRemoteFutureBill('user-1', 'bill-1')).rejects.toThrow('bill delete failed');
     const deleteCall = mock.calls.find((call) => call.table === 'future_bills' && call.operation === 'delete');
     expect(deleteCall?.filters).toEqual([['user_id', 'user-1'], ['id', 'bill-1']]);
+  });
+
+  it('deletes only the current and later occurrences for the owner and explicit series', async () => {
+    const remoteBills = [
+      { user_id: 'user-1', id: 'previous', series_id: 'series-a', occurrence_number: 1 },
+      { user_id: 'user-1', id: 'current', series_id: 'series-a', occurrence_number: 2 },
+      { user_id: 'user-1', id: 'next', series_id: 'series-a', occurrence_number: 3 },
+      { user_id: 'user-1', id: 'identical-other-series', series_id: 'series-b', occurrence_number: 2 },
+      { user_id: 'user-2', id: 'other-user', series_id: 'series-a', occurrence_number: 2 },
+    ];
+    mock.setResolver((call) => {
+      if (call.table === 'future_bills' && call.operation === 'delete') {
+        const userId = call.filters.find(([column]) => column === 'user_id')?.[1];
+        const seriesId = call.filters.find(([column]) => column === 'series_id')?.[1];
+        const occurrence = call.filters.find(([column]) => column === 'occurrence_number.gte')?.[1] as number;
+        for (let index = remoteBills.length - 1; index >= 0; index -= 1) {
+          const row = remoteBills[index];
+          if (row.user_id === userId && row.series_id === seriesId && row.occurrence_number >= occurrence) remoteBills.splice(index, 1);
+        }
+      }
+      if (call.table === 'future_bills' && call.operation !== 'delete') {
+        const userId = call.filters.find(([column]) => column === 'user_id')?.[1];
+        return { data: remoteBills.filter((bill) => bill.user_id === userId), error: null };
+      }
+      return { data: [], error: null, count: 0 };
+    });
+
+    await storage.deleteRemoteFutureBillsFrom('user-1', 'series-a', 2);
+    expect(remoteBills.map((bill) => bill.id)).toEqual(['previous', 'identical-other-series', 'other-user']);
+    expect((await storage.loadRemoteState('user-1')).bills.map((bill) => bill.id)).toEqual(['previous', 'identical-other-series']);
+    expect((await storage.loadRemoteState('user-2')).bills.map((bill) => bill.id)).toEqual(['other-user']);
+    const deleteCall = mock.calls.find((call) => call.table === 'future_bills' && call.operation === 'delete');
+    expect(deleteCall?.filters).toEqual([
+      ['user_id', 'user-1'],
+      ['series_id', 'series-a'],
+      ['occurrence_number.gte', 2],
+    ]);
+  });
+
+  it('rejects a ranged delete without an explicit safe identity before contacting Supabase', async () => {
+    await expect(storage.deleteRemoteFutureBillsFrom('user-1', '', 2)).rejects.toThrow('Identidade');
+    await expect(storage.deleteRemoteFutureBillsFrom('', 'series-a', 2)).rejects.toThrow('Identidade');
+    await expect(storage.deleteRemoteFutureBillsFrom('user-1', 'series-a', 0)).rejects.toThrow('Identidade');
+    expect(mock.calls.filter((call) => call.table === 'future_bills' && call.operation === 'delete')).toHaveLength(0);
+  });
+
+  it('propagates ranged delete errors and keeps the serialized queue usable', async () => {
+    let shouldFail = true;
+    mock.setResolver((call) => {
+      if (call.table === 'future_bills' && call.operation === 'delete' && shouldFail) {
+        shouldFail = false;
+        return { error: new Error('range delete failed') };
+      }
+      return { data: null, error: null };
+    });
+
+    await expect(storage.deleteRemoteFutureBillsFrom('user-1', 'series-a', 1)).rejects.toThrow('range delete failed');
+    await expect(storage.deleteRemoteFutureBillsFrom('user-1', 'series-a', 1)).resolves.toBeUndefined();
+    expect(mock.calls.filter((call) => call.operation === 'delete')).toHaveLength(2);
   });
 });

@@ -239,6 +239,38 @@ export function deleteRemoteFutureBill(userId: string, billId: string): Promise<
   return queuedDelete;
 }
 
+export function deleteRemoteFutureBillsFrom(
+  userId: string,
+  seriesId: string,
+  occurrenceNumber: number,
+): Promise<void> {
+  const normalizedUserId = userId.trim();
+  const normalizedSeriesId = seriesId.trim();
+  const normalizedOccurrenceNumber = Math.floor(occurrenceNumber);
+
+  if (!normalizedUserId || !normalizedSeriesId || !Number.isSafeInteger(occurrenceNumber) || normalizedOccurrenceNumber < 1) {
+    return Promise.reject(new Error('Identidade de recorrência inválida para exclusão.'));
+  }
+
+  if (!supabase) return Promise.resolve();
+  const client = supabase;
+
+  const queuedDelete = remoteSaveQueue.then(async () => {
+    await throwIfError(
+      client
+        .from('future_bills')
+        .delete()
+        .eq('user_id', normalizedUserId)
+        .eq('series_id', normalizedSeriesId)
+        .gte('occurrence_number', normalizedOccurrenceNumber)
+    );
+  });
+
+  remoteSaveQueue = queuedDelete.catch(() => undefined);
+
+  return queuedDelete;
+}
+
 async function persistRemoteState(userId: string, state: FinanceState) {
   if (!supabase) return;
   const normalized = normalizeState(state);

@@ -10,7 +10,8 @@ export function BillsPage({
   updateState,
   month,
   onDeleteFutureBill,
-}: PageProps & { month: string; onDeleteFutureBill?: (billId: string) => Promise<void> }) {
+  onDeleteFutureBillsFrom,
+}: PageProps & { month: string }) {
   type BillStatus = "pending" | "today" | "overdue" | "paid";
 
   const [billSearch, setBillSearch] = useState("");
@@ -18,6 +19,9 @@ export function BillsPage({
     "Todos"
   );
   const [billCategoryFilter, setBillCategoryFilter] = useState("Todas");
+  const [deleteTarget, setDeleteTarget] = useState<FutureBill | null>(null);
+  const [deleteScope, setDeleteScope] = useState<"single" | "from">("single");
+  const [deleting, setDeleting] = useState(false);
 
   const today = todayISO();
   const monthStart = `${month}-01`;
@@ -150,9 +154,9 @@ export function BillsPage({
       ),
     }));
 
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     if (onDeleteFutureBill) {
-      void onDeleteFutureBill(id).catch(() => undefined);
+      await onDeleteFutureBill(id);
       return;
     }
 
@@ -160,6 +164,66 @@ export function BillsPage({
       ...prev,
       bills: prev.bills.filter((b) => b.id !== id),
     }));
+  };
+
+  const removeFrom = async (seriesId: string, occurrenceNumber: number) => {
+    if (!seriesId.trim() || !Number.isSafeInteger(occurrenceNumber) || occurrenceNumber < 1) {
+      throw new Error("Identidade de recorrência inválida para exclusão.");
+    }
+
+    if (onDeleteFutureBillsFrom) {
+      await onDeleteFutureBillsFrom(seriesId, occurrenceNumber);
+      return;
+    }
+
+    updateState((prev) => ({
+      ...prev,
+      bills: prev.bills.filter((bill) =>
+        bill.seriesId !== seriesId ||
+        bill.occurrenceNumber === undefined ||
+        bill.occurrenceNumber < occurrenceNumber
+      ),
+    }));
+  };
+
+  const requestDelete = (bill: FutureBill) => {
+    if (!bill.seriesId || bill.occurrenceNumber === undefined) {
+      void remove(bill.id).catch(() => undefined);
+      return;
+    }
+
+    setDeleteTarget(bill);
+    setDeleteScope("single");
+  };
+
+  const hasPreviousOccurrence = Boolean(
+    deleteTarget?.seriesId &&
+    deleteTarget.occurrenceNumber !== undefined &&
+    state.bills.some((bill) =>
+      bill.id !== deleteTarget.id &&
+      bill.seriesId === deleteTarget.seriesId &&
+      bill.occurrenceNumber !== undefined &&
+      bill.occurrenceNumber < deleteTarget.occurrenceNumber!
+    )
+  );
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+
+    try {
+      if (deleteScope === "from") {
+        if (!deleteTarget.seriesId || deleteTarget.occurrenceNumber === undefined || hasPreviousOccurrence) return;
+        await removeFrom(deleteTarget.seriesId, deleteTarget.occurrenceNumber);
+      } else {
+        await remove(deleteTarget.id);
+      }
+      setDeleteTarget(null);
+    } catch {
+      // O estado e o diálogo permanecem intactos para permitir nova tentativa.
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const getNextBillDueDate = (bill: FutureBill) => {
@@ -560,7 +624,7 @@ export function BillsPage({
                         className="icon danger"
                         aria-label={`Excluir conta futura ${bill.description}`}
                         title="Excluir conta futura"
-                        onClick={() => remove(bill.id)}
+                        onClick={() => requestDelete(bill)}
                       >
                         <Trash2 size={15} />
                       </button>
@@ -584,6 +648,63 @@ export function BillsPage({
           </table>
         </div>
       </Panel>
+
+      {deleteTarget && (
+        <div className="bill-delete-backdrop" role="presentation">
+          <section
+            className="bill-delete-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bill-delete-title"
+            aria-describedby="bill-delete-description"
+          >
+            <h2 id="bill-delete-title">Excluir conta recorrente</h2>
+            <p id="bill-delete-description">
+              Escolha o alcance da exclusão. Ocorrências anteriores não serão removidas.
+            </p>
+
+            <fieldset className="bill-delete-options">
+              <legend>Alcance</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="bill-delete-scope"
+                  value="single"
+                  checked={deleteScope === "single"}
+                  onChange={() => setDeleteScope("single")}
+                />
+                <span><strong>Somente esta ocorrência</strong></span>
+              </label>
+              <label className={hasPreviousOccurrence ? "disabled" : undefined}>
+                <input
+                  type="radio"
+                  name="bill-delete-scope"
+                  value="from"
+                  checked={deleteScope === "from"}
+                  disabled={hasPreviousOccurrence}
+                  onChange={() => setDeleteScope("from")}
+                />
+                <span><strong>Esta e as próximas</strong></span>
+              </label>
+            </fieldset>
+
+            {hasPreviousOccurrence && (
+              <p className="bill-delete-warning" role="alert">
+                Esta opção está bloqueada porque uma ocorrência anterior poderia recriar a série. Um estado adicional de encerramento será necessário para excluí-la com segurança.
+              </p>
+            )}
+
+            <div className="bill-delete-actions">
+              <button type="button" className="secondary" disabled={deleting} onClick={() => setDeleteTarget(null)}>
+                Cancelar
+              </button>
+              <button type="button" className="danger" disabled={deleting} onClick={() => void confirmDelete()}>
+                {deleting ? "Excluindo..." : "Excluir"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

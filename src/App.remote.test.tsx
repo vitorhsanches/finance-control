@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   saveRemoteState: vi.fn(),
   deleteRemoteTransaction: vi.fn(),
   deleteRemoteFutureBill: vi.fn(),
+  deleteRemoteFutureBillsFrom: vi.fn(),
   loadProfile: vi.fn(),
   signOut: vi.fn(),
   getSession: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock('./lib/storage', () => ({
   saveRemoteState: mocks.saveRemoteState,
   deleteRemoteTransaction: mocks.deleteRemoteTransaction,
   deleteRemoteFutureBill: mocks.deleteRemoteFutureBill,
+  deleteRemoteFutureBillsFrom: mocks.deleteRemoteFutureBillsFrom,
   loadProfile: mocks.loadProfile,
   saveProfile: vi.fn(),
   getSession: vi.fn(),
@@ -65,6 +67,7 @@ beforeEach(() => {
   mocks.saveRemoteState.mockResolvedValue(undefined);
   mocks.deleteRemoteTransaction.mockResolvedValue(undefined);
   mocks.deleteRemoteFutureBill.mockResolvedValue(undefined);
+  mocks.deleteRemoteFutureBillsFrom.mockResolvedValue(undefined);
   mocks.getSession.mockResolvedValue({ data: { session: { user } } });
   mocks.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } });
   mocks.signOut.mockResolvedValue({ error: null });

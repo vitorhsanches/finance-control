@@ -18,6 +18,7 @@ vi.mock('./lib/storage', () => ({
   saveRemoteState: vi.fn(),
   deleteRemoteTransaction: vi.fn(),
   deleteRemoteFutureBill: vi.fn(),
+  deleteRemoteFutureBillsFrom: vi.fn(),
   loadProfile: vi.fn(),
   saveProfile: vi.fn(),
   getSession: vi.fn(),

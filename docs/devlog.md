@@ -221,3 +221,18 @@ Changed files:
 -  M src/types.ts
 - ?? src/pages/BillsPage.test.tsx
 - ?? supabase/migrations/
+
+## 2026-07-31 14:34
+- feat: adicionar exclusão segura de ocorrências futuras
+
+Changed files:
+-  M src/App.remote.test.tsx
+-  M src/App.test.tsx
+-  M src/App.tsx
+-  M src/index.css
+-  M src/lib/storage.test.ts
+-  M src/lib/storage.ts
+-  M src/pages/BillsPage.test.tsx
+-  M src/pages/BillsPage.tsx
+-  M src/pages/types.ts
+-  M src/test/supabaseMock.ts

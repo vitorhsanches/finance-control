@@ -2459,3 +2459,28 @@ td select:focus,
   .transaction-filters { grid-template-columns: 1fr; }
   .transaction-search { grid-column: 1; }
 }
+
+.bill-delete-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.55);
+}
+.bill-delete-dialog {
+  width: min(100%, 480px);
+  padding: 22px;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
+}
+.bill-delete-dialog h2 { margin: 0 0 8px; color: #0f172a; font-size: 1.15rem; }
+.bill-delete-dialog > p { margin: 0 0 16px; color: #475569; }
+.bill-delete-options { display: grid; gap: 8px; padding: 0; border: 0; }
+.bill-delete-options legend { margin-bottom: 7px; color: #334155; font-size: 0.8rem; font-weight: 800; }
+.bill-delete-options label { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; cursor: pointer; }
+.bill-delete-options label.disabled { color: #94a3b8; background: #f8fafc; cursor: not-allowed; }
+.bill-delete-warning { padding: 10px; color: #92400e !important; background: #fffbeb; border-radius: 10px; font-size: 0.82rem; }
+.bill-delete-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }

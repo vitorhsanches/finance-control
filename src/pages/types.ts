@@ -4,4 +4,5 @@ export interface PageProps {
   state: FinanceState;
   updateState: (updater: (previous: FinanceState) => FinanceState) => void;
   onDeleteFutureBill?: (billId: string) => Promise<void>;
+  onDeleteFutureBillsFrom?: (seriesId: string, occurrenceNumber: number) => Promise<void>;
 }
