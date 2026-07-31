@@ -127,6 +127,8 @@ export function BillsPage({
       bills: [
         {
           id: uid("bill"),
+          seriesId: uid("bill-series"),
+          occurrenceNumber: 1,
           dueDate: todayISO(),
           description: "Nova conta",
           category: "Casa",
@@ -185,6 +187,8 @@ export function BillsPage({
 
     const isRecurringBill = bill.recurring && bill.frequency !== "Única";
     const nextDueDate = getNextBillDueDate(bill);
+    const seriesId = bill.seriesId || uid("bill-series");
+    const occurrenceNumber = Math.max(1, Math.floor(toNumber(bill.occurrenceNumber) || 1));
 
     updateState((prev) => {
       const nextRecurringBillExists = prev.bills.some(
@@ -192,11 +196,8 @@ export function BillsPage({
           item.id !== bill.id &&
           item.recurring &&
           !item.paid &&
-          item.description === bill.description &&
-          item.category === bill.category &&
-          toNumber(item.amount) === toNumber(bill.amount) &&
-          item.frequency === bill.frequency &&
-          item.dueDate === nextDueDate
+          item.seriesId === seriesId &&
+          item.occurrenceNumber === occurrenceNumber + 1
       );
 
       return {
@@ -207,6 +208,9 @@ export function BillsPage({
               ? {
                   ...item,
                   paid: true,
+                  ...(isRecurringBill
+                    ? { seriesId, occurrenceNumber }
+                    : {}),
                 }
               : item
           ),
@@ -216,6 +220,8 @@ export function BillsPage({
                 {
                   ...bill,
                   id: uid("bill"),
+                  seriesId,
+                  occurrenceNumber: occurrenceNumber + 1,
                   dueDate: nextDueDate,
                   paid: false,
                 },
@@ -250,11 +256,9 @@ export function BillsPage({
             item.id !== bill.id &&
             item.recurring &&
             !item.paid &&
-            item.description === bill.description &&
-            item.category === bill.category &&
-            toNumber(item.amount) === toNumber(bill.amount) &&
-            item.frequency === bill.frequency &&
-            (item.dueDate || "") > (bill.dueDate || "")
+            Boolean(bill.seriesId) &&
+            item.seriesId === bill.seriesId &&
+            item.occurrenceNumber === (bill.occurrenceNumber || 1) + 1
         )
         .sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""))[0];
 
@@ -482,7 +486,20 @@ export function BillsPage({
                         type="checkbox"
                         checked={bill.recurring}
                         onChange={(e) =>
-                          patch(bill.id, { recurring: e.target.checked })
+                          patch(
+                            bill.id,
+                            e.target.checked
+                              ? {
+                                  recurring: true,
+                                  seriesId: bill.seriesId || uid("bill-series"),
+                                  occurrenceNumber: bill.occurrenceNumber || 1,
+                                }
+                              : {
+                                  recurring: false,
+                                  seriesId: undefined,
+                                  occurrenceNumber: undefined,
+                                },
+                          )
                         }
                       />
                     </td>

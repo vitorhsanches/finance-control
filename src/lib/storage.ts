@@ -555,6 +555,8 @@ function installmentToRow(userId: string, item: Installment) {
 function rowToBill(row: any): FutureBill {
   return {
     id: row.id,
+    seriesId: row.series_id || undefined,
+    occurrenceNumber: row.occurrence_number == null ? undefined : Number(row.occurrence_number),
     dueDate: ensureDate(row.due_date),
     description: row.description || '',
     category: row.category || '',
@@ -571,6 +573,8 @@ function billToRow(userId: string, item: FutureBill) {
   return {
     user_id: userId,
     id: item.id,
+    series_id: item.seriesId ?? null,
+    occurrence_number: item.occurrenceNumber ?? null,
     due_date: ensureDate(item.dueDate),
     description: item.description || '',
     category: item.category || '',

@@ -210,3 +210,14 @@ Changed files:
 -  M src/lib/storage.ts
 -  M src/pages/BillsPage.tsx
 -  M src/pages/types.ts
+
+## 2026-07-31 14:18
+- feat: adicionar identidade a séries de contas futuras
+
+Changed files:
+-  M src/lib/storage.test.ts
+-  M src/lib/storage.ts
+-  M src/pages/BillsPage.tsx
+-  M src/types.ts
+- ?? src/pages/BillsPage.test.tsx
+- ?? supabase/migrations/

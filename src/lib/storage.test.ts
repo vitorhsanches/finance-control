@@ -42,7 +42,10 @@ describe('remote storage', () => {
       card_rules: [{ card_name: 'Visa', closing_day: 20, due_day: 10 }],
       transactions: [{ id: 't1', date: '2026-07-10', description: 'Mercado', type: 'expense', category: 'Casa', amount: '25.50', payment_method: 'Pix', account_or_card: 'Conta principal', essential: true, paid: true }],
       installments: [],
-      future_bills: [{ id: 'b1', due_date: '2026-07-20', description: 'Internet', category: 'Casa', amount: '100', recurring: true, frequency: 'Mensal', priority: 'Alta', paid: false }],
+      future_bills: [
+        { id: 'b1', series_id: 'series-1', occurrence_number: 2, due_date: '2026-07-20', description: 'Internet', category: 'Casa', amount: '100', recurring: true, frequency: 'Mensal', priority: 'Alta', paid: false },
+        { id: 'legacy', series_id: null, occurrence_number: null, due_date: '2026-07-21', description: 'Legada', category: 'Casa', amount: '50', recurring: true, frequency: 'Mensal', priority: 'Alta', paid: false },
+      ],
       investments: [],
       budgets: []
     };
@@ -51,7 +54,10 @@ describe('remote storage', () => {
     const state = await storage.loadRemoteState('user-1');
     expect(state.settings).toMatchObject({ selectedMonth: '2026-07', startingBalance: 500, accounts: ['Conta principal'], cards: ['Visa'] });
     expect(state.transactions[0]).toMatchObject({ id: 't1', amount: 25.5, description: 'Mercado' });
-    expect(state.bills[0]).toMatchObject({ id: 'b1', amount: 100 });
+    expect(state.bills[0]).toMatchObject({ id: 'b1', amount: 100, seriesId: 'series-1', occurrenceNumber: 2 });
+    expect(state.bills[1]).toMatchObject({ id: 'legacy' });
+    expect(state.bills[1].seriesId).toBeUndefined();
+    expect(state.bills[1].occurrenceNumber).toBeUndefined();
   });
 
   it('propagates remote loading errors', async () => {
@@ -65,7 +71,7 @@ describe('remote storage', () => {
     const state = emptyState();
     state.transactions = [{ id: 't1', date: '2026-07-10', description: 'Mercado', type: 'expense', category: 'Casa', amount: 25, paymentMethod: 'Pix', accountOrCard: 'Conta', essential: true, paid: true }];
     state.installments = [{ id: 'i1', purchaseDate: '2026-07-01', description: 'Notebook', cardName: 'Visa', category: 'Compras', totalAmount: 1200, installments: 12, firstInstallmentMonth: '2026-07', paidInstallments: 0 }];
-    state.bills = [{ id: 'b1', dueDate: '2026-07-20', description: 'Internet', category: 'Casa', amount: 100, recurring: true, frequency: 'Mensal', priority: 'Alta', paid: false }];
+    state.bills = [{ id: 'b1', seriesId: 'series-1', occurrenceNumber: 1, dueDate: '2026-07-20', description: 'Internet', category: 'Casa', amount: 100, recurring: true, frequency: 'Mensal', priority: 'Alta', paid: false }];
     state.investments = [{ id: 'v1', type: 'CDB', institution: 'Banco', initialAmount: 1000, currentAmount: 1050, liquidity: 'Diária', goal: 'Reserva' }];
     state.budgets = [{ id: 'g1', month: '2026-07', category: 'Casa', monthlyBudget: 500 }];
     mock.setResolver(() => ({ data: [], error: null, count: 0 }));
@@ -78,6 +84,21 @@ describe('remote storage', () => {
       expect(call?.payload).toEqual(expect.arrayContaining([expect.objectContaining({ user_id: 'user-1', id: expect.any(String) })]));
       expect(mock.calls.some((item) => item.table === table && item.operation === 'delete')).toBe(false);
     }
+    expect(mock.calls.find((item) => item.table === 'future_bills' && item.operation === 'upsert')?.payload)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ series_id: 'series-1', occurrence_number: 1 })]));
+  });
+
+  it('keeps recurrence identities isolated by user during remote saves', async () => {
+    const state = emptyState();
+    state.bills = [{ id: 'same-id', seriesId: 'same-series', occurrenceNumber: 1, dueDate: '2026-07-20', description: 'Internet', category: 'Casa', amount: 100, recurring: true, frequency: 'Mensal', priority: 'Alta', paid: false }];
+    mock.setResolver(() => ({ data: [], error: null, count: 0 }));
+
+    await storage.saveRemoteState('user-1', state);
+    await storage.saveRemoteState('user-2', state);
+    const upserts = mock.calls.filter((item) => item.table === 'future_bills' && item.operation === 'upsert');
+    expect(upserts).toHaveLength(2);
+    expect(upserts[0].payload).toEqual(expect.arrayContaining([expect.objectContaining({ user_id: 'user-1', series_id: 'same-series' })]));
+    expect(upserts[1].payload).toEqual(expect.arrayContaining([expect.objectContaining({ user_id: 'user-2', series_id: 'same-series' })]));
   });
 
   it('blocks an individually empty financial collection when remote rows exist', async () => {

@@ -77,6 +77,8 @@ export interface Installment {
 
 export interface FutureBill {
   id: string;
+  seriesId?: string;
+  occurrenceNumber?: number;
   dueDate: string;
   description: string;
   category: string;
