@@ -17,6 +17,7 @@ vi.mock('./lib/storage', () => ({
   loadRemoteState: vi.fn(),
   saveRemoteState: vi.fn(),
   deleteRemoteTransaction: vi.fn(),
+  deleteRemoteFutureBill: vi.fn(),
   loadProfile: vi.fn(),
   saveProfile: vi.fn(),
   getSession: vi.fn(),
@@ -278,5 +279,18 @@ describe('application flows', () => {
     await waitFor(() => expect(mocks.saveLocalState).toHaveBeenLastCalledWith(
       expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 987.65 }) })
     ));
+  });
+
+  it('deletes future bills from local state without a remote delete', async () => {
+    const localState = emptyState();
+    localState.settings.selectedMonth = '2026-07';
+    localState.bills = [{ id: 'local-bill', dueDate: '2026-07-20', description: 'Conta local', category: 'Casa', amount: 50, recurring: false, frequency: 'Única', priority: 'Alta', paid: false }];
+    mocks.loadLocalState.mockReturnValue(localState);
+    render(<App />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Contas futuras' }));
+    await user.click(screen.getByRole('button', { name: 'Excluir conta futura Conta local' }));
+    await waitFor(() => expect(screen.queryByText('Conta local')).not.toBeInTheDocument());
+    expect(mocks.saveLocalState).toHaveBeenLastCalledWith(expect.objectContaining({ bills: [] }));
   });
 });

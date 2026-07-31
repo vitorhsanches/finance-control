@@ -9,7 +9,8 @@ export function BillsPage({
   state,
   updateState,
   month,
-}: PageProps & { month: string }) {
+  onDeleteFutureBill,
+}: PageProps & { month: string; onDeleteFutureBill?: (billId: string) => Promise<void> }) {
   type BillStatus = "pending" | "today" | "overdue" | "paid";
 
   const [billSearch, setBillSearch] = useState("");
@@ -147,11 +148,17 @@ export function BillsPage({
       ),
     }));
 
-  const remove = (id: string) =>
+  const remove = (id: string) => {
+    if (onDeleteFutureBill) {
+      void onDeleteFutureBill(id).catch(() => undefined);
+      return;
+    }
+
     updateState((prev) => ({
       ...prev,
       bills: prev.bills.filter((b) => b.id !== id),
     }));
+  };
 
   const getNextBillDueDate = (bill: FutureBill) => {
     const dueDate = bill.dueDate || todayISO();
@@ -563,4 +570,3 @@ export function BillsPage({
     </div>
   );
 }
-

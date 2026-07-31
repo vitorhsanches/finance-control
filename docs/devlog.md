@@ -198,3 +198,15 @@ Changed files:
 -  M src/lib/calculations.test.ts
 -  M src/lib/calculations.ts
 -  M src/pages/Dashboard.tsx
+
+## 2026-07-31 13:46
+- fix: persistir exclusão de contas futuras
+
+Changed files:
+-  M src/App.remote.test.tsx
+-  M src/App.test.tsx
+-  M src/App.tsx
+-  M src/lib/storage.test.ts
+-  M src/lib/storage.ts
+-  M src/pages/BillsPage.tsx
+-  M src/pages/types.ts

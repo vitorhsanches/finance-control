@@ -7,7 +7,7 @@ import type { FinanceState, PageKey } from "./types";
 import { emptyState, normalizeState } from "./data/sample";
 import {
   isSupabaseConfigured, loadLocalState, loadProfile, loadRemoteState,
-  deleteRemoteTransaction, saveLocalState, saveProfile, saveRemoteState, supabase,
+  deleteRemoteFutureBill, deleteRemoteTransaction, saveLocalState, saveProfile, saveRemoteState, supabase,
 } from "./lib/storage";
 import { currentMonth } from "./lib/utils";
 import { BudgetsPage } from "./pages/BudgetsPage";
@@ -242,6 +242,40 @@ export function App() {
           : "Não foi possível excluir o lançamento online.",
       );
       setStatus("Erro ao excluir lançamento");
+      throw error;
+    }
+  }, [remoteReady, updateState, userId]);
+
+  const removeFutureBill = useCallback(async (billId: string) => {
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+
+    try {
+      if (supabase && userId && remoteReady) {
+        setStatus("Excluindo conta futura...");
+        setSaveError(null);
+        await deleteRemoteFutureBill(userId, billId);
+      }
+
+      updateState((previous) => ({
+        ...previous,
+        bills: previous.bills.filter((bill) => bill.id !== billId),
+      }));
+
+      if (supabase && userId && remoteReady) {
+        setLastSavedAt(formatSaveTime());
+        setStatus("Online Supabase");
+      }
+    } catch (error) {
+      console.error(error);
+      setSaveError(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível excluir a conta futura online.",
+      );
+      setStatus("Erro ao excluir conta futura");
       throw error;
     }
   }, [remoteReady, updateState, userId]);
@@ -499,6 +533,7 @@ export function App() {
               state={state}
               updateState={updateState}
               month={selectedMonth}
+              onDeleteFutureBill={removeFutureBill}
             />
           )}
           {activePage === "bills" && (

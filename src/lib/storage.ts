@@ -220,6 +220,25 @@ export function deleteRemoteTransaction(userId: string, transactionId: string): 
   return queuedDelete;
 }
 
+export function deleteRemoteFutureBill(userId: string, billId: string): Promise<void> {
+  if (!supabase) return Promise.resolve();
+  const client = supabase;
+
+  const queuedDelete = remoteSaveQueue.then(async () => {
+    await throwIfError(
+      client
+        .from('future_bills')
+        .delete()
+        .eq('user_id', userId)
+        .eq('id', billId)
+    );
+  });
+
+  remoteSaveQueue = queuedDelete.catch(() => undefined);
+
+  return queuedDelete;
+}
+
 async function persistRemoteState(userId: string, state: FinanceState) {
   if (!supabase) return;
   const normalized = normalizeState(state);
