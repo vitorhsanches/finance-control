@@ -40,6 +40,7 @@ vi.mock('recharts', () => ({
   Area: () => null,
   BarChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Bar: () => null,
+  Legend: () => null,
   CartesianGrid: () => null,
   Cell: () => null,
   Pie: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,

@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import {
-  Area, AreaChart, CartesianGrid, Cell, Pie, PieChart,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Legend,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import type { FinanceState } from "../types";
 import {
-  budgetRows, expensesByCategory, getInstallmentsForMonth, getMetrics, upcomingBills,
+  budgetRows, commitmentsByCategory, getInstallmentsForMonth, getMetrics, upcomingBills,
 } from "../lib/calculations";
 import {
   getFinancialInsights,
@@ -13,11 +13,6 @@ import {
 } from "../lib/financialInsights";
 import { addMonths, formatDate, money, toNumber, ym } from "../lib/utils";
 import { Empty, Panel, StatusBadge } from "../components/ui";
-
-const COLORS = [
-  "#2563eb", "#16a34a", "#f59e0b", "#ef4444",
-  "#8b5cf6", "#06b6d4", "#64748b", "#ec4899",
-];
 
 export function Dashboard({
   state,
@@ -55,7 +50,7 @@ export function Dashboard({
 
     return {
       metrics: getMetrics(state, month),
-      categoryData: expensesByCategory(state, month).slice(0, 8),
+      categoryData: commitmentsByCategory(state, month).slice(0, 8),
       budgetData: budgetRows(state, month),
       upcoming: upcomingBills(state, 7),
       evolution: evolutionRows,
@@ -305,26 +300,22 @@ export function Dashboard({
       )}
 
       <section className="grid-2">
-        <Panel title="Gastos por categoria">
+        <Panel title="Compromissos por categoria">
           {categoryData.length ? (
             <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie
-                  dataKey="value"
-                  data={categoryData}
-                  innerRadius="48%"
-                  outerRadius="78%"
-                  paddingAngle={2}
-                >
-                  {categoryData.map((_entry, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(v) => money(Number(v), state)} />
-              </PieChart>
+              <BarChart data={categoryData} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+                <CartesianGrid stroke="#e2e8f0" strokeDasharray="4 4" vertical={false} />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                <YAxis tickFormatter={(value) => Number(value).toLocaleString("pt-BR")} />
+                <Tooltip formatter={(value) => money(Number(value), state)} />
+                <Legend />
+                <Bar name="Realizado" dataKey="realized" stackId="commitments" fill="#2563eb" />
+                <Bar name="Contas futuras" dataKey="futureBills" stackId="commitments" fill="#f59e0b" />
+                <Bar name="Parcelas" dataKey="installments" stackId="commitments" fill="#8b5cf6" />
+              </BarChart>
             </ResponsiveContainer>
           ) : (
-            <Empty message="Sem gastos no mês selecionado." />
+            <Empty message="Sem compromissos no mês selecionado." />
           )}
         </Panel>
         <Panel title="Evolução mensal">

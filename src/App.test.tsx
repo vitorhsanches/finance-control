@@ -37,6 +37,7 @@ vi.mock('recharts', () => ({
   Area: () => null,
   BarChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Bar: () => null,
+  Legend: () => null,
   CartesianGrid: () => null,
   Cell: () => null,
   Pie: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
@@ -151,7 +152,7 @@ describe('application flows', () => {
   it('shows useful empty states on a new account', () => {
     mocks.loadLocalState.mockReturnValue(emptyState());
     render(<App />);
-    expect(screen.getByText('Sem gastos no mês selecionado.')).toBeInTheDocument();
+    expect(screen.getByText('Sem compromissos no mês selecionado.')).toBeInTheDocument();
     expect(screen.getByText('Nenhuma conta vencendo nos próximos 7 dias.')).toBeInTheDocument();
     const summary = screen.getByRole('region', { name: 'Disponível no mês' });
     expect(within(summary).getAllByText(/R\$\s*0/).length).toBeGreaterThan(0);

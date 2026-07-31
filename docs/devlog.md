@@ -188,3 +188,13 @@ Changed files:
 -  M src/pages/ImportPage.tsx
 -  M tests/e2e/local.spec.ts
 -  M tests/e2e/mobile.spec.ts
+
+## 2026-07-31 13:34
+- feat: mostrar compromissos por categoria no dashboard
+
+Changed files:
+-  M src/App.remote.test.tsx
+-  M src/App.test.tsx
+-  M src/lib/calculations.test.ts
+-  M src/lib/calculations.ts
+-  M src/pages/Dashboard.tsx

@@ -80,6 +80,47 @@ export function expensesByCategory(state: FinanceState, month: string) {
   return [...map.entries()].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
 }
 
+export type CategoryCommitment = {
+  name: string;
+  realized: number;
+  futureBills: number;
+  installments: number;
+  total: number;
+};
+
+export function commitmentsByCategory(state: FinanceState, month: string) {
+  const map = new Map<string, CategoryCommitment>();
+  const add = (
+    category: string,
+    source: 'realized' | 'futureBills' | 'installments',
+    amount: number,
+  ) => {
+    const name = category || 'Outros';
+    const row = map.get(name) || {
+      name,
+      realized: 0,
+      futureBills: 0,
+      installments: 0,
+      total: 0,
+    };
+    const value = toNumber(amount);
+    row[source] += value;
+    row.total += value;
+    map.set(name, row);
+  };
+
+  state.transactions
+    .filter((transaction) => transaction.type === 'expense' && ym(transaction.date) === month)
+    .forEach((transaction) => add(transaction.category, 'realized', transaction.amount));
+  state.bills
+    .filter((bill) => !bill.paid && ym(bill.dueDate) === month)
+    .forEach((bill) => add(bill.category, 'futureBills', bill.amount));
+  getInstallmentsForMonth(state, month)
+    .forEach((row) => add(row.item.category, 'installments', row.amount));
+
+  return [...map.values()].sort((a, b) => b.total - a.total);
+}
+
 export function budgetRows(state: FinanceState, month: string) {
   return state.budgets
     .filter((b) => b.month === month)
