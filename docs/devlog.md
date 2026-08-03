@@ -247,3 +247,10 @@ Changed files:
 -  M src/pages/BillsPage.tsx
 -  M src/pages/Dashboard.tsx
 - ?? src/pages/Dashboard.test.tsx
+
+## 2026-08-03 17:56
+- fix: preservar backup local ao sair com sincronização indisponível
+
+Changed files:
+-  M src/App.remote.test.tsx
+-  M src/App.tsx

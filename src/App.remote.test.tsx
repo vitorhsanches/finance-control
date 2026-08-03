@@ -61,6 +61,7 @@ const user = { id: 'user-1', email: 'user@example.com' };
 beforeEach(() => {
   const state = emptyState();
   state.settings.selectedMonth = '2026-07';
+  state.settings.startingBalance = 123;
   mocks.loadLocalState.mockReturnValue(emptyState());
   mocks.loadRemoteState.mockResolvedValue(state);
   mocks.loadProfile.mockResolvedValue({ displayName: 'Ana' });
@@ -117,6 +118,27 @@ describe('remote application lifecycle', () => {
     );
   });
 
+  it('returns to the online status after an autosave succeeds following a failure', async () => {
+    const interaction = userEvent.setup();
+    await renderRemoteApp();
+    mocks.saveRemoteState.mockClear();
+    mocks.saveRemoteState.mockRejectedValueOnce(new Error('Falha de sincronização'));
+
+    await interaction.click(screen.getByRole('button', { name: 'Configurações' }));
+    const balance = screen.getByLabelText('Saldo inicial');
+    await interaction.clear(balance);
+    await interaction.type(balance, '700');
+    await interaction.tab();
+    expect(await screen.findByText('Falha de sincronização', {}, { timeout: 2500 })).toBeInTheDocument();
+
+    await interaction.clear(balance);
+    await interaction.type(balance, '701');
+    await interaction.tab();
+
+    await waitFor(() => expect(screen.queryByText('Falha de sincronização')).not.toBeInTheDocument(), { timeout: 2500 });
+    expect(screen.getByTitle(/Online Supabase/)).toBeInTheDocument();
+  });
+
   it('waits for a final save before logging out', async () => {
     const interaction = userEvent.setup();
     await renderRemoteApp();
@@ -128,9 +150,66 @@ describe('remote application lifecycle', () => {
     const logoutButtons = screen.getAllByRole('button', { name: 'Sair' });
     await interaction.click(logoutButtons[logoutButtons.length - 1]);
     await waitFor(() => expect(mocks.signOut).toHaveBeenCalled());
+    expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
     expect(order[order.length - 1]).toBe('signOut');
     expect(order.slice(0, -1)).not.toHaveLength(0);
     expect(order.slice(0, -1).every((step) => step === 'save')).toBe(true);
+    expect(await screen.findByRole('heading', { name: 'Entrar' })).toBeInTheDocument();
+  });
+
+  it('logs out even when the final remote save fails and keeps the local backup', async () => {
+    const interaction = userEvent.setup();
+    await renderRemoteApp();
+    mocks.saveLocalState.mockClear();
+    mocks.saveRemoteState.mockRejectedValue(new Error('save unavailable'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const logoutButtons = screen.getAllByRole('button', { name: 'Sair' });
+    await interaction.click(logoutButtons[logoutButtons.length - 1]);
+
+    await waitFor(() => expect(mocks.signOut).toHaveBeenCalled());
+    expect(await screen.findByRole('heading', { name: 'Entrar' })).toBeInTheDocument();
+    expect(mocks.saveLocalState).not.toHaveBeenCalledWith(
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 0 }) })
+    );
+    errorSpy.mockRestore();
+  });
+
+  it('clears local authentication when the remote session has already expired', async () => {
+    const interaction = userEvent.setup();
+    await renderRemoteApp();
+    mocks.saveLocalState.mockClear();
+    mocks.signOut.mockResolvedValue({
+      error: Object.assign(new Error('Auth session missing!'), { name: 'AuthSessionMissingError' })
+    });
+    const warningSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const logoutButtons = screen.getAllByRole('button', { name: 'Sair' });
+    await interaction.click(logoutButtons[logoutButtons.length - 1]);
+
+    expect(await screen.findByRole('heading', { name: 'Entrar' })).toBeInTheDocument();
+    expect(mocks.saveLocalState).not.toHaveBeenCalledWith(
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 0 }) })
+    );
+    warningSpy.mockRestore();
+  });
+
+  it('keeps the local backup and reports a real sign-out failure', async () => {
+    const interaction = userEvent.setup();
+    await renderRemoteApp();
+    mocks.saveLocalState.mockClear();
+    mocks.signOut.mockResolvedValue({ error: new Error('Logout service unavailable') });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const logoutButtons = screen.getAllByRole('button', { name: 'Sair' });
+    await interaction.click(logoutButtons[logoutButtons.length - 1]);
+
+    expect(await screen.findByText('Logout service unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
+    expect(mocks.saveLocalState).not.toHaveBeenCalledWith(
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 0 }) })
+    );
+    errorSpy.mockRestore();
   });
 
   it('deletes a remote transaction before removing it locally and it stays absent after reload', async () => {

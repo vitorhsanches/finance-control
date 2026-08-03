@@ -56,6 +56,13 @@ const navGroups: Array<{ label: string; items: PageKey[] }> = [
   { label: "Sistema", items: ["settings"] },
 ];
 
+function isMissingSessionError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+
+  return error.name === "AuthSessionMissingError"
+    || error.message.toLowerCase().includes("auth session missing");
+}
+
 export function App() {
   const [state, setState] = useState<FinanceState>(() => loadLocalState());
   const [activePage, setActivePage] = useState<PageKey>("dashboard");
@@ -74,6 +81,16 @@ export function App() {
   const backupInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedMonth = state.settings.selectedMonth || currentMonth();
+
+  const clearAuthenticatedSession = () => {
+    setRemoteReady(false);
+    setUserId(null);
+    setEmail(null);
+    setDisplayName("");
+    setDisplayNameDraft("");
+    setProfileMessage("");
+    setLastSavedAt(null);
+  };
 
   useEffect(() => {
     async function boot() {
@@ -96,18 +113,11 @@ export function App() {
         setEmail(session.user.email || null);
         setRemoteReady(true);
         } else {
-          setRemoteReady(false);
-          setUserId(null);
-          setEmail(null);
-          setDisplayName("");
-          setDisplayNameDraft("");
-          setProfileMessage("");
-          setLastSavedAt(null);
+          clearAuthenticatedSession();
           setSaveError(null);
-          setState(emptyState());
           setStatus("Aguardando login");
         }
-      supabase.auth.onAuthStateChange(async (_event, session) => {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
         if (session?.user?.id) {
           setRemoteReady(false);
           setStatus("Carregando dados online...");
@@ -124,20 +134,18 @@ export function App() {
           setEmail(session.user.email || null);
           setRemoteReady(true);
           } else {
-            setRemoteReady(false);
-            setUserId(null);
-            setEmail(null);
-            setDisplayName("");
-            setDisplayNameDraft("");
-            setProfileMessage("");
-            setLastSavedAt(null);
+            clearAuthenticatedSession();
             setSaveError(null);
-            setState(emptyState());
             setStatus("Aguardando login");
           }
       });
+
+      return subscription;
     }
-    boot();
+    let subscription: { unsubscribe: () => void } | undefined;
+    void boot().then((result) => { subscription = result; });
+
+    return () => subscription?.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -370,24 +378,37 @@ export function App() {
       }
 
       if (userId && remoteReady) {
-        await withTimeout(
-          saveRemoteState(userId, state),
-          5000,
-          "Tempo limite ao salvar antes de sair. Tente novamente.",
-        );
+        try {
+          await withTimeout(
+            saveRemoteState(userId, state),
+            5000,
+            "Tempo limite ao salvar antes de sair.",
+          );
 
-        setLastSavedAt(formatSaveTime());
+          setLastSavedAt(formatSaveTime());
+        } catch (error) {
+          console.error("Remote save before logout failed.", error);
+          setSaveError("Não foi possível sincronizar antes de sair. Backup local mantido neste navegador.");
+        }
       }
 
       setStatus("Saindo...");
 
-      await withTimeout(
-        supabase.auth.signOut(),
+      const { error: signOutError } = await withTimeout(
+        supabase.auth.signOut({ scope: "local" }),
         5000,
         "Tempo limite ao sair. Recarregue a página e tente novamente.",
       );
 
-      setLogoutLoading(false);
+      if (signOutError && !isMissingSessionError(signOutError)) {
+        throw signOutError;
+      }
+
+      if (signOutError) {
+        console.warn("Supabase session was already unavailable during logout.");
+      }
+
+      clearAuthenticatedSession();
       setStatus("Sessão encerrada");
     } catch (error) {
       console.error(error);
@@ -399,6 +420,7 @@ export function App() {
       );
 
       setStatus("Erro ao sair");
+    } finally {
       setLogoutLoading(false);
     }
   };
