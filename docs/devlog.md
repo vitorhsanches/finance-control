@@ -236,3 +236,14 @@ Changed files:
 -  M src/pages/BillsPage.tsx
 -  M src/pages/types.ts
 -  M src/test/supabaseMock.ts
+
+## 2026-08-03 11:49
+- fix: preservar integridade dos compromissos financeiros
+
+Changed files:
+-  M src/lib/calculations.test.ts
+-  M src/lib/calculations.ts
+-  M src/pages/BillsPage.test.tsx
+-  M src/pages/BillsPage.tsx
+-  M src/pages/Dashboard.tsx
+- ?? src/pages/Dashboard.test.tsx

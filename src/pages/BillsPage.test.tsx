@@ -23,16 +23,19 @@ function recurringBill(overrides: Partial<FutureBill> = {}): FutureBill {
 
 function Harness({
   bills = [],
+  transactions = [],
   onDeleteFutureBill,
   onDeleteFutureBillsFrom,
 }: {
   bills?: FutureBill[];
+  transactions?: FinanceState['transactions'];
   onDeleteFutureBill?: (billId: string) => Promise<void>;
   onDeleteFutureBillsFrom?: (seriesId: string, occurrenceNumber: number) => Promise<void>;
 }) {
   const initial = emptyState();
   initial.settings.selectedMonth = '2026-07';
   initial.bills = bills;
+  initial.transactions = transactions;
   const [state, setState] = useState<FinanceState>(initial);
   return (
     <>
@@ -44,12 +47,17 @@ function Harness({
         onDeleteFutureBillsFrom={onDeleteFutureBillsFrom}
       />
       <output data-testid="bills-state">{JSON.stringify(state.bills)}</output>
+      <output data-testid="transactions-state">{JSON.stringify(state.transactions)}</output>
     </>
   );
 }
 
 function currentBills() {
   return JSON.parse(screen.getByTestId('bills-state').textContent || '[]') as FutureBill[];
+}
+
+function currentTransactions() {
+  return JSON.parse(screen.getByTestId('transactions-state').textContent || '[]') as FinanceState['transactions'];
 }
 
 describe('future bill recurrence identity', () => {
@@ -181,5 +189,42 @@ describe('safe recurring future bill deletion', () => {
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(currentBills()).toHaveLength(2);
     expect(deleteFrom).toHaveBeenCalledWith('series-a', 1);
+  });
+});
+
+describe('future bill payment reversal integrity', () => {
+  it('removes only the exact linked payment transaction', async () => {
+    const user = userEvent.setup();
+    const first = recurringBill({ id: 'first', description: 'Conta igual', dueDate: '2026-07-20', category: 'Casa', amount: 100 });
+    const second = recurringBill({ id: 'second', description: 'Conta igual', dueDate: '2026-07-20', category: 'Casa', amount: 100 });
+    render(<Harness bills={[first, second]} transactions={[{
+      id: 'second-payment', date: second.dueDate, description: second.description,
+      type: 'expense', category: second.category, amount: second.amount,
+      paymentMethod: 'Boleto', accountOrCard: 'Conta', essential: true, paid: true,
+      source: 'future-bill:second'
+    }]} />);
+
+    await user.click(screen.getAllByRole('button', { name: 'Pagar' })[0]);
+    await user.click(screen.getByRole('button', { name: 'Desmarcar' }));
+
+    expect(currentBills().find((bill) => bill.id === 'first')).toMatchObject({ paid: false });
+    expect(currentTransactions()).toHaveLength(1);
+    expect(currentTransactions()[0].source).toBe('future-bill:second');
+  });
+
+  it('does not remove a similar transaction when the exact linked payment is absent', async () => {
+    const user = userEvent.setup();
+    const bill = recurringBill({ id: 'first', paid: true, description: 'Conta igual', dueDate: '2026-07-20', category: 'Casa', amount: 100 });
+    render(<Harness bills={[bill]} transactions={[{
+      id: 'similar-manual', date: bill.dueDate, description: bill.description,
+      type: 'expense', category: bill.category, amount: bill.amount,
+      paymentMethod: 'Pix', accountOrCard: 'Conta', essential: true, paid: true,
+      source: 'manual'
+    }]} />);
+
+    await user.click(screen.getByRole('button', { name: 'Desmarcar' }));
+    expect(currentBills()[0]).toMatchObject({ paid: false });
+    expect(currentTransactions()).toHaveLength(1);
+    expect(currentTransactions()[0].source).toBe('manual');
   });
 });

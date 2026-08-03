@@ -78,20 +78,32 @@ describe('category commitments', () => {
     const state = stateForCommitments();
     state.transactions = [transaction()];
     expect(commitmentsByCategory(state, '2026-07')).toEqual([
-      { name: 'Casa', realized: 100, futureBills: 0, installments: 0, total: 100 }
+      { name: 'Casa', realized: 100, futureBills: 0, installments: 0 }
     ]);
+  });
+
+  it('does not include pending expense transactions as realized', () => {
+    const state = stateForCommitments();
+    state.transactions = [{ ...transaction(), paid: false }];
+    expect(commitmentsByCategory(state, '2026-07')).toEqual([]);
+  });
+
+  it('includes paid expense transactions as realized', () => {
+    const state = stateForCommitments();
+    state.transactions = [transaction()];
+    expect(commitmentsByCategory(state, '2026-07')[0]).toMatchObject({ realized: 100 });
   });
 
   it('groups only unpaid future bills', () => {
     const state = stateForCommitments();
     state.bills = [bill()];
-    expect(commitmentsByCategory(state, '2026-07')[0]).toMatchObject({ futureBills: 80, total: 80 });
+    expect(commitmentsByCategory(state, '2026-07')[0]).toMatchObject({ futureBills: 80 });
   });
 
   it('groups only installments projected for the month', () => {
     const state = stateForCommitments();
     state.installments = [installment()];
-    expect(commitmentsByCategory(state, '2026-07')[0]).toMatchObject({ installments: 100, total: 100 });
+    expect(commitmentsByCategory(state, '2026-07')[0]).toMatchObject({ installments: 100 });
   });
 
   it('combines the three sources while keeping them separate', () => {
@@ -100,7 +112,7 @@ describe('category commitments', () => {
     state.bills = [bill()];
     state.installments = [installment()];
     expect(commitmentsByCategory(state, '2026-07')[0]).toEqual({
-      name: 'Casa', realized: 100, futureBills: 80, installments: 100, total: 280
+      name: 'Casa', realized: 100, futureBills: 80, installments: 100
     });
   });
 
@@ -109,7 +121,7 @@ describe('category commitments', () => {
     state.transactions = [{ ...transaction(), source: 'future-bill:bill' }];
     state.bills = [bill(true)];
     expect(commitmentsByCategory(state, '2026-07')[0]).toMatchObject({
-      realized: 100, futureBills: 0, total: 100
+      realized: 100, futureBills: 0
     });
   });
 
@@ -118,9 +130,9 @@ describe('category commitments', () => {
     state.transactions = [transaction(), { ...transaction('2026-08-08'), id: 'august', amount: 40 }];
     state.bills = [bill()];
     state.installments = [installment()];
-    expect(commitmentsByCategory(state, '2026-07')[0].total).toBe(280);
+    expect(commitmentsByCategory(state, '2026-07')[0]).toMatchObject({ realized: 100, futureBills: 80, installments: 100 });
     expect(commitmentsByCategory(state, '2026-08')[0]).toEqual({
-      name: 'Casa', realized: 40, futureBills: 0, installments: 100, total: 140
+      name: 'Casa', realized: 40, futureBills: 0, installments: 100
     });
   });
 });

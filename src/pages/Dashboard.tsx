@@ -301,6 +301,9 @@ export function Dashboard({
 
       <section className="grid-2">
         <Panel title="Compromissos por categoria">
+          <p className="muted">
+            Realizado, Contas futuras e Parcelas são estados diferentes e podem conter itens ainda não reconciliados.
+          </p>
           {categoryData.length ? (
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={categoryData} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
@@ -309,9 +312,9 @@ export function Dashboard({
                 <YAxis tickFormatter={(value) => Number(value).toLocaleString("pt-BR")} />
                 <Tooltip formatter={(value) => money(Number(value), state)} />
                 <Legend />
-                <Bar name="Realizado" dataKey="realized" stackId="commitments" fill="#2563eb" />
-                <Bar name="Contas futuras" dataKey="futureBills" stackId="commitments" fill="#f59e0b" />
-                <Bar name="Parcelas" dataKey="installments" stackId="commitments" fill="#8b5cf6" />
+                <Bar name="Realizado" dataKey="realized" fill="#2563eb" />
+                <Bar name="Contas futuras" dataKey="futureBills" fill="#f59e0b" />
+                <Bar name="Parcelas" dataKey="installments" fill="#8b5cf6" />
               </BarChart>
             </ResponsiveContainer>
           ) : (

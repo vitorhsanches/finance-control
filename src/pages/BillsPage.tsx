@@ -348,18 +348,7 @@ export function BillsPage({
               : item
           ),
         transactions: prev.transactions.filter((transaction) => {
-          const linkedFutureBill =
-            transaction.source === `future-bill:${bill.id}`;
-
-          const generatedFutureBillByData =
-            (transaction.source || "").startsWith("future-bill") &&
-            transaction.type === "expense" &&
-            transaction.date === (bill.dueDate || todayISO()) &&
-            transaction.description === bill.description &&
-            transaction.category === bill.category &&
-            toNumber(transaction.amount) === toNumber(bill.amount);
-
-          return !(linkedFutureBill || generatedFutureBillByData);
+          return transaction.source !== `future-bill:${bill.id}`;
         }),
       };
     });
