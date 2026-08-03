@@ -236,3 +236,10 @@ Changed files:
 -  M src/pages/BillsPage.tsx
 -  M src/pages/types.ts
 -  M src/test/supabaseMock.ts
+
+## 2026-08-03
+- chore: preparar encerramento persistente de séries futuras
+
+A implementação da Fase 2B.1 está pausada após a preparação dos scripts SQL,
+aguardando validação runtime em um projeto Supabase de teste. Nenhuma migration
+foi aplicada.
