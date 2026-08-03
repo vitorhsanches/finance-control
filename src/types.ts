@@ -1,4 +1,9 @@
 export type TransactionType = 'income' | 'expense';
+export type TransactionOriginType =
+  | 'manual'
+  | 'future_bill_payment'
+  | 'installment_payment'
+  | 'bank_import';
 export type PageKey = 'dashboard' | 'transactions' | 'import' | 'installments' | 'bills' | 'investments' | 'budgets' | 'settings';
 
 export interface CardRule {
@@ -57,6 +62,9 @@ export interface Transaction {
   accountOrCard: string;
   essential: boolean;
   paid: boolean;
+  originType?: TransactionOriginType;
+  originId?: string;
+  importId?: string;
   source?: string;
   externalHash?: string;
   notes?: string;

@@ -23,11 +23,33 @@ describe('local storage', () => {
   it('round-trips normalized state and recovers from invalid JSON', () => {
     const state = emptyState();
     state.settings.startingBalance = 123.45;
+    state.transactions = [{
+      id: 'origin-payment', date: '2026-07-10', description: 'Conta', type: 'expense',
+      category: 'Casa', amount: 100, paymentMethod: 'Boleto', accountOrCard: 'Conta',
+      essential: true, paid: true, originType: 'future_bill_payment',
+      originId: 'bill-1', source: 'future-bill:bill-1'
+    }];
     storage.saveLocalState(state);
     expect(storage.loadLocalState().settings.startingBalance).toBe(123.45);
+    expect(storage.loadLocalState().transactions[0]).toMatchObject({
+      originType: 'future_bill_payment', originId: 'bill-1', source: 'future-bill:bill-1'
+    });
 
     localStorage.setItem(storage.LOCAL_STORAGE_KEY, '{invalid');
     expect(storage.loadLocalState().transactions.length).toBeGreaterThan(0);
+  });
+
+  it('loads a legacy backup whose transactions have no structured origin', () => {
+    const state = emptyState();
+    state.transactions = [{
+      id: 'legacy', date: '2026-07-10', description: 'Legada', type: 'expense',
+      category: 'Casa', amount: 50, paymentMethod: 'Pix', accountOrCard: 'Conta',
+      essential: false, paid: true, source: 'manual'
+    }];
+    localStorage.setItem(storage.LOCAL_STORAGE_KEY, JSON.stringify(state));
+
+    expect(storage.loadLocalState().transactions[0]).toMatchObject({ id: 'legacy', source: 'manual' });
+    expect(storage.loadLocalState().transactions[0].originType).toBeUndefined();
   });
 });
 
@@ -40,7 +62,10 @@ describe('remote storage', () => {
       cards: [{ name: 'Visa' }],
       payment_methods: [{ name: 'Pix' }],
       card_rules: [{ card_name: 'Visa', closing_day: 20, due_day: 10 }],
-      transactions: [{ id: 't1', date: '2026-07-10', description: 'Mercado', type: 'expense', category: 'Casa', amount: '25.50', payment_method: 'Pix', account_or_card: 'Conta principal', essential: true, paid: true }],
+      transactions: [
+        { id: 't1', date: '2026-07-10', description: 'Mercado', type: 'expense', category: 'Casa', amount: '25.50', payment_method: 'Pix', account_or_card: 'Conta principal', essential: true, paid: true },
+        { id: 'orphan', date: '2026-07-11', description: 'Conta removida', type: 'expense', category: 'Casa', amount: '80', payment_method: 'Boleto', account_or_card: 'Conta principal', essential: true, paid: true, origin_type: 'future_bill_payment', origin_id: 'missing-bill', import_id: null, source: 'future-bill:missing-bill' },
+      ],
       installments: [],
       future_bills: [
         { id: 'b1', series_id: 'series-1', occurrence_number: 2, due_date: '2026-07-20', description: 'Internet', category: 'Casa', amount: '100', recurring: true, frequency: 'Mensal', priority: 'Alta', paid: false },
@@ -54,6 +79,9 @@ describe('remote storage', () => {
     const state = await storage.loadRemoteState('user-1');
     expect(state.settings).toMatchObject({ selectedMonth: '2026-07', startingBalance: 500, accounts: ['Conta principal'], cards: ['Visa'] });
     expect(state.transactions[0]).toMatchObject({ id: 't1', amount: 25.5, description: 'Mercado' });
+    expect(state.transactions[1]).toMatchObject({
+      id: 'orphan', originType: 'future_bill_payment', originId: 'missing-bill'
+    });
     expect(state.bills[0]).toMatchObject({ id: 'b1', amount: 100, seriesId: 'series-1', occurrenceNumber: 2 });
     expect(state.bills[1]).toMatchObject({ id: 'legacy' });
     expect(state.bills[1].seriesId).toBeUndefined();
@@ -69,7 +97,7 @@ describe('remote storage', () => {
 
   it('upserts financial rows with the composite key and never deletes them', async () => {
     const state = emptyState();
-    state.transactions = [{ id: 't1', date: '2026-07-10', description: 'Mercado', type: 'expense', category: 'Casa', amount: 25, paymentMethod: 'Pix', accountOrCard: 'Conta', essential: true, paid: true }];
+    state.transactions = [{ id: 't1', date: '2026-07-10', description: 'Mercado', type: 'expense', category: 'Casa', amount: 25, paymentMethod: 'Pix', accountOrCard: 'Conta', essential: true, paid: true, originType: 'future_bill_payment', originId: 'bill-payment', source: 'future-bill:bill-payment' }];
     state.installments = [{ id: 'i1', purchaseDate: '2026-07-01', description: 'Notebook', cardName: 'Visa', category: 'Compras', totalAmount: 1200, installments: 12, firstInstallmentMonth: '2026-07', paidInstallments: 0 }];
     state.bills = [{ id: 'b1', seriesId: 'series-1', occurrenceNumber: 1, dueDate: '2026-07-20', description: 'Internet', category: 'Casa', amount: 100, recurring: true, frequency: 'Mensal', priority: 'Alta', paid: false }];
     state.investments = [{ id: 'v1', type: 'CDB', institution: 'Banco', initialAmount: 1000, currentAmount: 1050, liquidity: 'Diária', goal: 'Reserva' }];
@@ -86,6 +114,11 @@ describe('remote storage', () => {
     }
     expect(mock.calls.find((item) => item.table === 'future_bills' && item.operation === 'upsert')?.payload)
       .toEqual(expect.arrayContaining([expect.objectContaining({ series_id: 'series-1', occurrence_number: 1 })]));
+    expect(mock.calls.find((item) => item.table === 'transactions' && item.operation === 'upsert')?.payload)
+      .toEqual(expect.arrayContaining([expect.objectContaining({
+        origin_type: 'future_bill_payment', origin_id: 'bill-payment', import_id: null,
+        source: 'future-bill:bill-payment'
+      })]));
   });
 
   it('keeps recurrence identities isolated by user during remote saves', async () => {

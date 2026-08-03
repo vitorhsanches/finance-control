@@ -49,6 +49,9 @@ export async function mockSupabase(page: Page, options: MockOptions = {}) {
     account_or_card: "Conta E2E",
     essential: false,
     paid: true,
+    origin_type: null,
+    origin_id: null,
+    import_id: null,
   }];
 
   await page.route("**/__supabase/**", async (route) => {

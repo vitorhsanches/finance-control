@@ -125,6 +125,20 @@ describe('category commitments', () => {
     });
   });
 
+  it('keeps an orphaned future bill payment in realized totals and available balance', () => {
+    const state = stateForCommitments();
+    state.settings.startingBalance = 500;
+    state.transactions = [{
+      ...transaction(),
+      originType: 'future_bill_payment',
+      originId: 'removed-bill',
+      source: 'future-bill:removed-bill',
+    }];
+
+    expect(commitmentsByCategory(state, '2026-07')[0]).toMatchObject({ realized: 100 });
+    expect(getMetrics(state, '2026-07').availableBalance).toBe(400);
+  });
+
   it('recalculates commitments when the selected month changes', () => {
     const state = stateForCommitments();
     state.transactions = [transaction(), { ...transaction('2026-08-08'), id: 'august', amount: 40 }];

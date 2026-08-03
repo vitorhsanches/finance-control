@@ -193,6 +193,51 @@ describe('safe recurring future bill deletion', () => {
 });
 
 describe('future bill payment reversal integrity', () => {
+  it('creates a structured origin while preserving the legacy source', async () => {
+    const user = userEvent.setup();
+    render(<Harness bills={[recurringBill({ id: 'structured' })]} />);
+
+    await user.click(screen.getByRole('button', { name: 'Pagar' }));
+
+    expect(currentTransactions()).toHaveLength(1);
+    expect(currentTransactions()[0]).toMatchObject({
+      originType: 'future_bill_payment',
+      originId: 'structured',
+      source: 'future-bill:structured',
+    });
+  });
+
+  it('does not create a second payment when the structured origin already exists', async () => {
+    const user = userEvent.setup();
+    const bill = recurringBill({ id: 'structured' });
+    render(<Harness bills={[bill]} transactions={[{
+      id: 'existing', date: bill.dueDate, description: bill.description, type: 'expense',
+      category: bill.category, amount: bill.amount, paymentMethod: 'Boleto', accountOrCard: 'Conta',
+      essential: true, paid: true, originType: 'future_bill_payment', originId: bill.id,
+      source: `future-bill:${bill.id}`
+    }]} />);
+
+    await user.click(screen.getByRole('button', { name: 'Pagar' }));
+
+    expect(currentBills()[0]).toMatchObject({ paid: true });
+    expect(currentTransactions()).toHaveLength(1);
+  });
+
+  it('does not create a second payment when an exact legacy source already exists', async () => {
+    const user = userEvent.setup();
+    const bill = recurringBill({ id: 'legacy' });
+    render(<Harness bills={[bill]} transactions={[{
+      id: 'legacy-payment', date: bill.dueDate, description: bill.description, type: 'expense',
+      category: bill.category, amount: bill.amount, paymentMethod: 'Boleto', accountOrCard: 'Conta',
+      essential: true, paid: true, source: `future-bill:${bill.id}`
+    }]} />);
+
+    await user.click(screen.getByRole('button', { name: 'Pagar' }));
+
+    expect(currentBills()[0]).toMatchObject({ paid: true });
+    expect(currentTransactions()).toHaveLength(1);
+  });
+
   it('removes only the exact linked payment transaction', async () => {
     const user = userEvent.setup();
     const first = recurringBill({ id: 'first', description: 'Conta igual', dueDate: '2026-07-20', category: 'Casa', amount: 100 });
@@ -201,7 +246,7 @@ describe('future bill payment reversal integrity', () => {
       id: 'second-payment', date: second.dueDate, description: second.description,
       type: 'expense', category: second.category, amount: second.amount,
       paymentMethod: 'Boleto', accountOrCard: 'Conta', essential: true, paid: true,
-      source: 'future-bill:second'
+      originType: 'future_bill_payment', originId: 'second', source: 'future-bill:second'
     }]} />);
 
     await user.click(screen.getAllByRole('button', { name: 'Pagar' })[0]);
@@ -209,7 +254,9 @@ describe('future bill payment reversal integrity', () => {
 
     expect(currentBills().find((bill) => bill.id === 'first')).toMatchObject({ paid: false });
     expect(currentTransactions()).toHaveLength(1);
-    expect(currentTransactions()[0].source).toBe('future-bill:second');
+    expect(currentTransactions()[0]).toMatchObject({
+      originType: 'future_bill_payment', originId: 'second', source: 'future-bill:second'
+    });
   });
 
   it('does not remove a similar transaction when the exact linked payment is absent', async () => {

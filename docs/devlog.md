@@ -247,3 +247,7 @@ Changed files:
 -  M src/pages/BillsPage.tsx
 -  M src/pages/Dashboard.tsx
 - ?? src/pages/Dashboard.test.tsx
+
+## 2026-08-03
+- chore: preparar origem estruturada de pagamentos para validação
+- A migration de identidade estruturada para pagamentos de contas futuras está pausada, aguardando validação runtime em um projeto Supabase de teste dedicado.

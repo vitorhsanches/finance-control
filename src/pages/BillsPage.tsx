@@ -255,6 +255,13 @@ export function BillsPage({
     const occurrenceNumber = Math.max(1, Math.floor(toNumber(bill.occurrenceNumber) || 1));
 
     updateState((prev) => {
+      const paymentAlreadyExists = prev.transactions.some(
+        (transaction) =>
+          (transaction.originType === "future_bill_payment" &&
+            transaction.originId === bill.id) ||
+          (!transaction.originType &&
+            transaction.source === `future-bill:${bill.id}`)
+      );
       const nextRecurringBillExists = prev.bills.some(
         (item) =>
           item.id !== bill.id &&
@@ -292,22 +299,26 @@ export function BillsPage({
               ]
             : []),
         ],
-        transactions: [
-          {
-            id: uid("tr"),
-            date: bill.dueDate || todayISO(),
-            description: bill.description,
-            type: "expense",
-            category: bill.category,
-            amount: bill.amount,
-            paymentMethod: "Boleto",
-            accountOrCard: prev.settings.accounts[0] || "Conta",
-            essential: true,
-            paid: true,
-            source: `future-bill:${bill.id}`,
-          },
-          ...prev.transactions,
-        ],
+        transactions: paymentAlreadyExists
+          ? prev.transactions
+          : [
+              {
+                id: uid("tr"),
+                date: bill.dueDate || todayISO(),
+                description: bill.description,
+                type: "expense",
+                category: bill.category,
+                amount: bill.amount,
+                paymentMethod: "Boleto",
+                accountOrCard: prev.settings.accounts[0] || "Conta",
+                essential: true,
+                paid: true,
+                originType: "future_bill_payment",
+                originId: bill.id,
+                source: `future-bill:${bill.id}`,
+              },
+              ...prev.transactions,
+            ],
       };
     });
   };
@@ -348,7 +359,13 @@ export function BillsPage({
               : item
           ),
         transactions: prev.transactions.filter((transaction) => {
-          return transaction.source !== `future-bill:${bill.id}`;
+          const linkedByStructuredOrigin =
+            transaction.originType === "future_bill_payment" &&
+            transaction.originId === bill.id;
+          const linkedByLegacySource =
+            !transaction.originType &&
+            transaction.source === `future-bill:${bill.id}`;
+          return !(linkedByStructuredOrigin || linkedByLegacySource);
         }),
       };
     });
