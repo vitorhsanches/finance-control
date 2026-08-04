@@ -254,3 +254,16 @@ Changed files:
 Changed files:
 -  M src/App.remote.test.tsx
 -  M src/App.tsx
+
+## 2026-08-04
+- Aplicada manualmente no projeto Supabase `mvmdcmiwkwerldriyzce` a migration `supabase/migrations/20260731140000_add_future_bill_series_identity.sql`.
+- Causa: ausência das colunas `series_id` e `occurrence_number` causava PGRST204 no upsert de `future_bills`.
+- Ação: migration aplicada e cache do PostgREST recarregado.
+- Resultado: autosave restaurado.
+- Nenhuma outra migration foi aplicada.
+
+## 2026-08-04 10:18
+- docs: registrar aplicação da migration de contas futuras
+
+Changed files:
+-  M docs/devlog.md
