@@ -1890,6 +1890,9 @@ button:disabled {
 .sidebar-sync.ready svg { color: #4ade80; }
 .sidebar-sync.syncing svg { color: #60a5fa; }
 .sidebar-sync.error { color: #fecaca; }
+.sync-details-toggle { display: block; padding: 2px 0; color: inherit; background: none; border: 0; text-decoration: underline; font-size: inherit; cursor: pointer; }
+.sync-details { display: grid; gap: 3px; margin-top: 6px; font-size: 0.68rem; }
+.sync-retry { min-height: 28px; margin-top: 4px; padding: 5px 8px; font-size: 0.68rem; }
 
 .sidebar-action {
   width: 100%;

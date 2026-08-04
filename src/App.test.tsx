@@ -81,7 +81,7 @@ describe('application flows', () => {
     expect(topbar).toHaveTextContent('Dashboard');
     expect(topbar).toHaveTextContent('Mês');
     expect(topbar).not.toHaveTextContent('Modo local');
-    expect(screen.getByTitle('Modo local')).toHaveTextContent('Modo local');
+    expect(screen.getByTitle('Salvo localmente')).toHaveTextContent('Salvo localmente');
     expect(screen.getByRole('button', { name: 'Exportar backup' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Importar backup' })).toBeInTheDocument();
   });

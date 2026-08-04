@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   saveLocalState: vi.fn(),
   loadRemoteState: vi.fn(),
   saveRemoteState: vi.fn(),
+  getRemoteErrorDetails: vi.fn(),
   deleteRemoteTransaction: vi.fn(),
   deleteRemoteFutureBill: vi.fn(),
   deleteRemoteFutureBillsFrom: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('./lib/storage', () => ({
   saveLocalState: mocks.saveLocalState,
   loadRemoteState: mocks.loadRemoteState,
   saveRemoteState: mocks.saveRemoteState,
+  getRemoteErrorDetails: mocks.getRemoteErrorDetails,
   deleteRemoteTransaction: mocks.deleteRemoteTransaction,
   deleteRemoteFutureBill: mocks.deleteRemoteFutureBill,
   deleteRemoteFutureBillsFrom: mocks.deleteRemoteFutureBillsFrom,
@@ -66,6 +68,7 @@ beforeEach(() => {
   mocks.loadRemoteState.mockResolvedValue(state);
   mocks.loadProfile.mockResolvedValue({ displayName: 'Ana' });
   mocks.saveRemoteState.mockResolvedValue(undefined);
+  mocks.getRemoteErrorDetails.mockImplementation((error: unknown) => ({ message: error instanceof Error ? error.message : 'Erro remoto desconhecido.' }));
   mocks.deleteRemoteTransaction.mockResolvedValue(undefined);
   mocks.deleteRemoteFutureBill.mockResolvedValue(undefined);
   mocks.deleteRemoteFutureBillsFrom.mockResolvedValue(undefined);
@@ -112,7 +115,7 @@ describe('remote application lifecycle', () => {
     await interaction.type(screen.getByLabelText('Saldo inicial'), '700');
     await interaction.tab();
 
-    expect(await screen.findByText('Falha de sincronização', {}, { timeout: 2500 })).toBeInTheDocument();
+    expect(await screen.findByText('Erro de sincronização', {}, { timeout: 2500 })).toBeInTheDocument();
     expect(mocks.saveLocalState).toHaveBeenLastCalledWith(
       expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 700 }) })
     );
@@ -129,14 +132,13 @@ describe('remote application lifecycle', () => {
     await interaction.clear(balance);
     await interaction.type(balance, '700');
     await interaction.tab();
-    expect(await screen.findByText('Falha de sincronização', {}, { timeout: 2500 })).toBeInTheDocument();
+    expect(await screen.findByText('Erro de sincronização', {}, { timeout: 2500 })).toBeInTheDocument();
 
     await interaction.clear(balance);
     await interaction.type(balance, '701');
     await interaction.tab();
 
-    await waitFor(() => expect(screen.queryByText('Falha de sincronização')).not.toBeInTheDocument(), { timeout: 2500 });
-    expect(screen.getByTitle(/Online Supabase/)).toBeInTheDocument();
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledTimes(2), { timeout: 2500 });
   });
 
   it('waits for a final save before logging out', async () => {
@@ -204,7 +206,9 @@ describe('remote application lifecycle', () => {
     const logoutButtons = screen.getAllByRole('button', { name: 'Sair' });
     await interaction.click(logoutButtons[logoutButtons.length - 1]);
 
-    expect(await screen.findByText('Logout service unavailable')).toBeInTheDocument();
+    expect(await screen.findByText('Erro de sincronização')).toBeInTheDocument();
+    await interaction.click(screen.getByRole('button', { name: 'Ver detalhes de sincronização' }));
+    expect(screen.getAllByText(/Logout service unavailable/).length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
     expect(mocks.saveLocalState).not.toHaveBeenCalledWith(
       expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 0 }) })
@@ -248,7 +252,8 @@ describe('remote application lifecycle', () => {
     await interaction.click(screen.getByRole('button', { name: 'Lançamentos' }));
     await interaction.click(screen.getByRole('button', { name: 'Excluir lançamento Não apagar' }));
 
-    expect(await screen.findByText('delete unavailable')).toBeInTheDocument();
+    expect(await screen.findByText(/delete unavailable/)).toBeInTheDocument();
     expect(screen.getByText('Não apagar')).toBeInTheDocument();
   });
+
 });

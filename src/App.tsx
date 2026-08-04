@@ -7,7 +7,7 @@ import type { FinanceState, PageKey } from "./types";
 import { emptyState, normalizeState } from "./data/sample";
 import {
   isSupabaseConfigured, loadLocalState, loadProfile, loadRemoteState,
-  deleteRemoteFutureBill, deleteRemoteFutureBillsFrom, deleteRemoteTransaction, saveLocalState, saveProfile, saveRemoteState, supabase,
+  deleteRemoteFutureBill, deleteRemoteFutureBillsFrom, deleteRemoteTransaction, getRemoteErrorDetails, saveLocalState, saveProfile, saveRemoteState, supabase,
 } from "./lib/storage";
 import { currentMonth } from "./lib/utils";
 import { BudgetsPage } from "./pages/BudgetsPage";
@@ -63,6 +63,8 @@ function isMissingSessionError(error: unknown) {
     || error.message.toLowerCase().includes("auth session missing");
 }
 
+type SyncState = "local-only" | "syncing" | "online" | "error";
+
 export function App() {
   const [state, setState] = useState<FinanceState>(() => loadLocalState());
   const [activePage, setActivePage] = useState<PageKey>("dashboard");
@@ -70,6 +72,9 @@ export function App() {
   const [status, setStatus] = useState("Modo local");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [syncState, setSyncState] = useState<SyncState>("local-only");
+  const [syncError, setSyncError] = useState<ReturnType<typeof getRemoteErrorDetails> | null>(null);
+  const [showSyncDetails, setShowSyncDetails] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [displayNameDraft, setDisplayNameDraft] = useState("");
@@ -78,6 +83,7 @@ export function App() {
   const [email, setEmail] = useState<string | null>(null);
   const [remoteReady, setRemoteReady] = useState(!isSupabaseConfigured);
   const saveTimer = useRef<number | null>(null);
+  const activeSaveRef = useRef<Promise<boolean> | null>(null);
   const backupInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedMonth = state.settings.selectedMonth || currentMonth();
@@ -91,6 +97,36 @@ export function App() {
     setProfileMessage("");
     setLastSavedAt(null);
   };
+
+  const runRemoteSave = useCallback((remoteUserId: string, remoteState: FinanceState) => {
+    if (activeSaveRef.current) return activeSaveRef.current;
+
+    const savePromise = (async () => {
+      setSyncState("syncing");
+      setSyncError(null);
+      setShowSyncDetails(false);
+      setStatus("Salvando online...");
+
+      try {
+        await saveRemoteState(remoteUserId, remoteState);
+        setLastSavedAt(formatSaveTime());
+        setSyncState("online");
+        setStatus("Online Supabase");
+        return true;
+      } catch (error) {
+        setSyncError({ ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() });
+        setSyncState("error");
+        setStatus("Erro de sincronização");
+        return false;
+      }
+    })();
+
+    activeSaveRef.current = savePromise;
+    void savePromise.finally(() => {
+      if (activeSaveRef.current === savePromise) activeSaveRef.current = null;
+    });
+    return savePromise;
+  }, []);
 
   useEffect(() => {
     async function boot() {
@@ -108,6 +144,7 @@ export function App() {
         setDisplayNameDraft(profile.displayName);
         setSaveError(null);
         setStatus("Online Supabase");
+        setSyncState("online");
         setState(remote);
         setUserId(session.user.id);
         setEmail(session.user.email || null);
@@ -129,6 +166,7 @@ export function App() {
           setDisplayNameDraft(profile.displayName);
           setSaveError(null);
           setStatus("Online Supabase");
+          setSyncState("online");
           setState(remote);
           setUserId(session.user.id);
           setEmail(session.user.email || null);
@@ -137,6 +175,7 @@ export function App() {
             clearAuthenticatedSession();
             setSaveError(null);
             setStatus("Aguardando login");
+            setSyncState("local-only");
           }
       });
 
@@ -152,6 +191,8 @@ export function App() {
     saveLocalState(state);
 
     if (!supabase || !userId || !remoteReady) return;
+
+    setSyncState("local-only");
 
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current);
@@ -181,28 +222,14 @@ export function App() {
       setSaveError(
         `Existem ${invalidDateCount} item(ns) sem data válida. Corrija antes de salvar online.`
       );
-      setStatus("Erro de validação");
+      setSyncError({ message: `Existem ${invalidDateCount} item(ns) sem data válida. Corrija antes de salvar online.` });
+      setSyncState("error");
+      setStatus("Erro de sincronização");
       return;
     }
 
-    saveTimer.current = window.setTimeout(async () => {
-      try {
-        setStatus("Salvando online...");
-        setSaveError(null);
-
-        await saveRemoteState(userId, state);
-
-        setLastSavedAt(formatSaveTime());
-        setStatus("Online Supabase");
-      } catch (error) {
-        console.error(error);
-        setSaveError(
-          error instanceof Error
-            ? error.message
-            : "Erro ao salvar online. Backup local mantido neste navegador."
-        );
-        setStatus("Erro ao salvar online");
-      }
+    saveTimer.current = window.setTimeout(() => {
+      void runRemoteSave(userId, state);
     }, 800);
 
     return () => {
@@ -210,7 +237,7 @@ export function App() {
         window.clearTimeout(saveTimer.current);
       }
     };
-  }, [state, userId, remoteReady]);
+  }, [state, userId, remoteReady, runRemoteSave]);
 
   const updateState = useCallback(
     (updater: (prev: FinanceState) => FinanceState) =>
@@ -378,18 +405,7 @@ export function App() {
       }
 
       if (userId && remoteReady) {
-        try {
-          await withTimeout(
-            saveRemoteState(userId, state),
-            5000,
-            "Tempo limite ao salvar antes de sair.",
-          );
-
-          setLastSavedAt(formatSaveTime());
-        } catch (error) {
-          console.error("Remote save before logout failed.", error);
-          setSaveError("Não foi possível sincronizar antes de sair. Backup local mantido neste navegador.");
-        }
+        await runRemoteSave(userId, state);
       }
 
       setStatus("Saindo...");
@@ -412,6 +428,9 @@ export function App() {
       setStatus("Sessão encerrada");
     } catch (error) {
       console.error(error);
+
+      setSyncError({ message: error instanceof Error ? error.message : "Não foi possível sair agora." });
+      setSyncState("error");
 
       setSaveError(
         error instanceof Error
@@ -438,12 +457,18 @@ export function App() {
     }
   };
 
-  const syncStatus = saveError
-    ? saveError
-    : `${status}${email ? ` · ${email}` : ""}${lastSavedAt ? ` · último salvamento: ${lastSavedAt}` : ""}`;
-  const isSyncing = status.includes("Salvando") || status.includes("Carregando");
-  const syncTone = saveError ? "error" : isSyncing ? "syncing" : "ready";
-  const SyncIcon = saveError ? AlertCircle : isSyncing ? LoaderCircle : CheckCircle2;
+  const syncLabel = {
+    "local-only": "Salvo localmente",
+    syncing: "Sincronizando…",
+    online: "Online Supabase",
+    error: "Erro de sincronização",
+  }[syncState];
+  const syncStatus = syncLabel;
+  const syncTone = syncState === "error" ? "error" : syncState === "syncing" ? "syncing" : "ready";
+  const SyncIcon = syncState === "error" ? AlertCircle : syncState === "syncing" ? LoaderCircle : CheckCircle2;
+  const retrySync = () => {
+    if (userId && remoteReady && syncState !== "syncing") void runRemoteSave(userId, state);
+  };
     if (isSupabaseConfigured && !userId) {
       return <AuthScreen />;
     }
@@ -504,10 +529,39 @@ export function App() {
 
           <div className="sidebar-actions">
             <div className={`sidebar-sync ${syncTone}`} role="status" aria-live="polite" title={syncStatus}>
-              <SyncIcon size={15} className={isSyncing ? "spin" : undefined} />
+              <SyncIcon size={15} className={syncState === "syncing" ? "spin" : undefined} />
               <div>
-                <strong>{saveError || status}</strong>
-                {lastSavedAt && !saveError && <time>Salvo {lastSavedAt}</time>}
+                {status !== syncLabel && <span className="sr-only">{status}</span>}
+                <strong>{syncLabel}</strong>
+                {lastSavedAt && syncState === "online" && <time>Última sincronização: {lastSavedAt}</time>}
+                {syncState === "error" && syncError && (
+                  <>
+                    <span className="sync-error-summary">{syncError.message}</span>
+                    <button
+                      type="button"
+                      className="sync-details-toggle"
+                      aria-label={showSyncDetails ? "Ocultar detalhes de sincronização" : "Ver detalhes de sincronização"}
+                      onClick={() => setShowSyncDetails((current) => !current)}
+                    >
+                      {showSyncDetails ? "Ocultar detalhes" : "Ver detalhes"}
+                    </button>
+                    {showSyncDetails && (
+                      <div className="sync-details">
+                        <span>Tabela: {syncError.table || "—"}</span>
+                        <span>Operação: {syncError.operation || "—"}</span>
+                        <span>Código: {syncError.code || "—"}</span>
+                        <span>Horário: {syncError.timestamp ? formatSaveTime(new Date(syncError.timestamp)) : formatSaveTime()}</span>
+                        <span>{syncError.message}</span>
+                        {syncError.details && <span>Detalhes: {syncError.details}</span>}
+                        {syncError.hint && <span>Dica: {syncError.hint}</span>}
+                        <button type="button" className="secondary sync-retry" onClick={retrySync}>
+                          Tentar novamente
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+                {saveError && syncState !== "error" && <span className="sync-error-summary">{saveError}</span>}
               </div>
             </div>
             <button type="button" className="sidebar-action" onClick={exportBackup}>

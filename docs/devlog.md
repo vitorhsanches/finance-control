@@ -267,3 +267,13 @@ Changed files:
 
 Changed files:
 -  M docs/devlog.md
+
+## 2026-08-04 11:01
+- feat: melhorar diagnóstico e status de sincronização
+
+Changed files:
+-  M src/App.remote.test.tsx
+-  M src/App.test.tsx
+-  M src/App.tsx
+-  M src/index.css
+-  M src/lib/storage.ts

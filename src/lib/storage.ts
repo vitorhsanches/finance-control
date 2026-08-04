@@ -8,6 +8,35 @@ export { isSupabaseConfigured, supabase } from './supabaseClient';
 export const LOCAL_STORAGE_KEY = 'finance-control-react-v3';
 const LEGACY_LOCAL_STORAGE_KEY = 'finance-control-react-v1';
 let remoteSaveQueue: Promise<void> = Promise.resolve();
+
+export type RemoteOperation = 'select' | 'upsert' | 'delete' | 'insert';
+
+export type RemoteErrorDetails = {
+  table?: string;
+  operation?: RemoteOperation;
+  code?: string;
+  message: string;
+  details?: string;
+  hint?: string;
+  status?: number;
+  timestamp?: string;
+};
+
+export class RemoteSaveError extends Error {
+  readonly details: RemoteErrorDetails;
+
+  constructor(details: RemoteErrorDetails) {
+    super(details.message);
+    this.name = 'RemoteSaveError';
+    this.details = details;
+  }
+}
+
+export function getRemoteErrorDetails(error: unknown): RemoteErrorDetails {
+  if (error instanceof RemoteSaveError) return error.details;
+  if (error instanceof Error) return { message: error.message };
+  return { message: 'Erro remoto desconhecido.' };
+}
 export function loadLocalState(): FinanceState {
   const raw = localStorage.getItem(LOCAL_STORAGE_KEY) || localStorage.getItem(LEGACY_LOCAL_STORAGE_KEY);
   if (!raw) return sampleState();
@@ -278,9 +307,9 @@ async function persistRemoteState(userId: string, state: FinanceState) {
   await preventUnsafeEmptyCollectionOverwrites(userId, normalized);
   await preventUnsafeCatalogOverwrite(userId, normalized);
 
-  await throwIfError(supabase.from('profiles').upsert({ user_id: userId, updated_at: new Date().toISOString() }));
+  await executeRemoteRequest('profiles', 'upsert', supabase.from('profiles').upsert({ user_id: userId, updated_at: new Date().toISOString() }));
 
-  await throwIfError(supabase.from('app_settings').upsert({
+  await executeRemoteRequest('app_settings', 'upsert', supabase.from('app_settings').upsert({
     user_id: userId,
     currency: normalized.settings.currency,
     selected_month: normalized.settings.selectedMonth,
@@ -305,12 +334,11 @@ async function persistRemoteState(userId: string, state: FinanceState) {
     for (const collection of collections) {
       if (collection.localCount > 0) continue;
 
-      const { count, error } = await supabase
-        .from(collection.tableName)
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', userId);
-
-      if (error) throw error;
+      const { count } = await executeRemoteRequest(
+        collection.tableName,
+        'select',
+        supabase.from(collection.tableName).select('id', { count: 'exact', head: true }).eq('user_id', userId)
+      );
 
       if ((count || 0) > 0) {
         throw new Error(
@@ -356,12 +384,11 @@ async function persistRemoteState(userId: string, state: FinanceState) {
     for (const check of checks) {
       if (check.newCount > 0) continue;
 
-      const { count, error } = await supabase
-        .from(check.tableName)
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', userId);
-
-      if (error) throw error;
+      const { count } = await executeRemoteRequest(
+        check.tableName,
+        'select',
+        supabase.from(check.tableName).select('*', { count: 'exact', head: true }).eq('user_id', userId)
+      );
 
       if ((count || 0) > 0) {
         throw new Error(
@@ -435,7 +462,9 @@ async function upsertRows(
 ) {
   if (!supabase || rows.length === 0) return;
 
-  await throwIfError(
+  await executeRemoteRequest(
+    tableName,
+    'upsert',
     supabase
       .from(tableName)
       .upsert(rows, {
@@ -447,10 +476,47 @@ async function upsertRows(
 
 async function replaceRows(tableName: string, userId: string, rows: Array<Record<string, unknown>>) {
   if (!supabase) return;
-  await throwIfError(supabase.from(tableName).delete().eq('user_id', userId));
+  await executeRemoteRequest(tableName, 'delete', supabase.from(tableName).delete().eq('user_id', userId));
   if (rows.length > 0) {
-    await throwIfError(supabase.from(tableName).insert(rows));
+    await executeRemoteRequest(tableName, 'insert', supabase.from(tableName).insert(rows));
   }
+}
+
+async function executeRemoteRequest<T extends { error: unknown; status?: number }>(
+  table: string,
+  operation: RemoteOperation,
+  request: PromiseLike<T>
+): Promise<T> {
+  const result = await request;
+  if (!result.error) return result;
+
+  const raw = typeof result.error === 'object' && result.error !== null
+    ? result.error as Record<string, unknown>
+    : {};
+  const details: RemoteErrorDetails = {
+    table,
+    operation,
+    code: typeof raw.code === 'string' ? raw.code : undefined,
+    message: typeof raw.message === 'string' ? raw.message : String(result.error),
+    details: typeof raw.details === 'string' ? raw.details : undefined,
+    hint: typeof raw.hint === 'string' ? raw.hint : undefined,
+    status: typeof result.status === 'number'
+      ? result.status
+      : typeof raw.status === 'number' ? raw.status : undefined,
+  };
+
+  if (import.meta.env.DEV) {
+    console.error('[FinaSync remote save]', {
+      table: details.table,
+      operation: details.operation,
+      code: details.code,
+      message: details.message,
+      details: details.details,
+      hint: details.hint,
+    });
+  }
+
+  throw new RemoteSaveError(details);
 }
 
 async function throwIfError(request: PromiseLike<{ error: unknown }>) {
