@@ -1085,15 +1085,15 @@ input.money-input.money-negative {
 .installment-summary-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 .installment-summary-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 14px;
+  gap: 10px;
+  padding: 8px 10px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 14px;
   background: rgba(15, 23, 42, 0.02);
@@ -1116,6 +1116,12 @@ input.money-input.money-negative {
   text-align: right;
   white-space: nowrap;
 }
+
+/* Compact overview keeps all four metrics visible without a tall dashboard header. */
+.installment-overview { gap: 10px; }
+.installment-overview .metric { min-height: 78px; padding: 11px 13px; border-radius: 12px; }
+.installment-overview .metric span { font-size: 0.72rem; }
+.installment-overview .metric strong { font-size: 1.15rem; line-height: 1.15; }
 
 .installment-controls {
   display: grid;

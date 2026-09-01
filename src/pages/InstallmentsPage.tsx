@@ -203,7 +203,7 @@ export function InstallmentsPage({
 
   return (
     <div className="page-stack">
-      <section className="cards-grid">
+      <section className="cards-grid installment-overview" aria-label="Resumo de cartões e parcelas">
         <MetricCard
           label="Fatura em parcelas"
           value={money(monthInstallmentsTotal, state)}

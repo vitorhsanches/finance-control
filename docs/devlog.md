@@ -296,3 +296,11 @@ Changed files:
 -  M src/AuthScreen.test.tsx
 -  M src/lib/storage.test.ts
 -  M src/lib/storage.ts
+
+## 2026-09-01 11:28
+- style: compactar resumos de cartões e parcelas
+
+Changed files:
+-  M src/index.css
+-  M src/pages/InstallmentsPage.tsx
+- ?? src/pages/InstallmentsPage.test.tsx
