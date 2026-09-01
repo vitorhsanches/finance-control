@@ -2359,6 +2359,13 @@ td select:focus,
 .transaction-clear:disabled { opacity: 0.45; cursor: default; }
 .transaction-results { margin: 12px 2px 8px; color: #64748b; font-size: 0.82rem; }
 .transaction-results strong { color: #0f172a; font-variant-numeric: tabular-nums; }
+.transaction-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; }
+.transaction-summary-item { min-width: 0; }
+.transaction-summary-item span { display: block; color: #64748b; font-size: 0.72rem; font-weight: 700; }
+.transaction-summary-item strong { display: block; margin-top: 3px; overflow: hidden; color: #0f172a; font-size: 1rem; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.transaction-summary-item.income strong, .transaction-summary-item.positive strong { color: #047857; }
+.transaction-summary-item.expense strong, .transaction-summary-item.negative strong { color: #b91c1c; }
+.transaction-summary-item.count strong { color: #334155; }
 
 .transaction-table-wrap {
   max-height: min(660px, calc(100vh - 300px));
@@ -2425,6 +2432,7 @@ td select:focus,
 
 @media (max-width: 720px) {
   .transaction-filters { grid-template-columns: 1fr 1fr; padding: 10px; }
+  .transaction-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .transaction-search { grid-column: 1 / -1; }
   .transaction-period { min-width: 0; }
   .transaction-clear { width: 100%; }

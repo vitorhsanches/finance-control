@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Check, ChevronDown, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import type { Transaction } from "../types";
-import { currentMonth, formatDate, money, todayISO, uid, ym } from "../lib/utils";
+import { currentMonth, formatDate, money, todayISO, toNumber, uid, ym } from "../lib/utils";
 import { Empty, MoneyInput, Panel, Select } from "../components/ui";
 import type { PageProps } from "./types";
 
@@ -43,6 +43,13 @@ export function TransactionsPage({ state, updateState, month, onDeleteTransactio
         .some((value) => value.toLocaleLowerCase("pt-BR").includes(normalizedQuery)));
   }, [monthRows, category, type, account, query]);
   const hasFilters = query !== "" || category !== "Todos" || type !== "Todos" || account !== "Todos";
+  const summary = useMemo(() => {
+    const income = rows.filter((transaction) => transaction.type === "income")
+      .reduce((total, transaction) => total + toNumber(transaction.amount), 0);
+    const expenses = rows.filter((transaction) => transaction.type === "expense")
+      .reduce((total, transaction) => total + Math.abs(toNumber(transaction.amount)), 0);
+    return { income, expenses, balance: income - expenses, count: rows.length };
+  }, [rows]);
 
   const categoryOptions = (transaction: Transaction) => {
     const base = transaction.type === "income" ? incomeCategories : expenseCategories;
@@ -148,6 +155,13 @@ export function TransactionsPage({ state, updateState, month, onDeleteTransactio
 
       <div className="transaction-results" aria-live="polite">
         <strong>{rows.length}</strong> de {monthRows.length} lançamento(s)
+      </div>
+
+      <div className="transaction-summary" aria-label="Resumo dos lançamentos">
+        <div className="transaction-summary-item income"><span>Entradas</span><strong>{money(summary.income, state)}</strong></div>
+        <div className="transaction-summary-item expense"><span>Saídas</span><strong>{money(summary.expenses, state)}</strong></div>
+        <div className={`transaction-summary-item ${summary.balance < 0 ? "negative" : summary.balance > 0 ? "positive" : "neutral"}`}><span>Saldo</span><strong>{money(summary.balance, state)}</strong></div>
+        <div className="transaction-summary-item count"><span>Lançamentos</span><strong>{summary.count}</strong></div>
       </div>
 
       {rows.length ? (
