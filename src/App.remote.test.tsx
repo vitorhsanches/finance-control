@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyState } from './data/sample';
@@ -60,6 +60,16 @@ import { App } from './App';
 
 const user = { id: 'user-1', email: 'user@example.com' };
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 beforeEach(() => {
   const state = emptyState();
   state.settings.selectedMonth = '2026-07';
@@ -82,6 +92,9 @@ async function renderRemoteApp() {
   const result = render(<App />);
   expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
   await waitFor(() => expect(mocks.loadRemoteState).toHaveBeenCalledWith('user-1'));
+  await waitFor(() => expect(mocks.saveLocalState).toHaveBeenCalledWith(
+    expect.objectContaining({ settings: expect.objectContaining({ selectedMonth: '2026-07' }) }),
+  ));
   return result;
 }
 
@@ -108,7 +121,7 @@ describe('remote application lifecycle', () => {
     const interaction = userEvent.setup();
     await renderRemoteApp();
     mocks.saveRemoteState.mockClear();
-    mocks.saveRemoteState.mockRejectedValue(new Error('Falha de sincronização'));
+    mocks.saveRemoteState.mockRejectedValue(new TypeError('Failed to fetch'));
 
     await interaction.click(screen.getByRole('button', { name: 'Configurações' }));
     await interaction.clear(screen.getByLabelText('Saldo inicial'));
@@ -119,6 +132,8 @@ describe('remote application lifecycle', () => {
     expect(mocks.saveLocalState).toHaveBeenLastCalledWith(
       expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 700 }) })
     );
+    await interaction.click(screen.getByRole('button', { name: 'Ver detalhes de sincronização' }));
+    expect(screen.getAllByText('Failed to fetch').length).toBeGreaterThan(0);
   });
 
   it('returns to the online status after an autosave succeeds following a failure', async () => {
@@ -141,6 +156,134 @@ describe('remote application lifecycle', () => {
     await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledTimes(2), { timeout: 2500 });
   });
 
+  it('coalesces changes during an active save and confirms only the newest revision', async () => {
+    const interaction = userEvent.setup();
+    const firstSave = deferred();
+    const latestSave = deferred();
+    await renderRemoteApp();
+    mocks.saveRemoteState.mockClear();
+    mocks.saveRemoteState
+      .mockImplementationOnce(() => firstSave.promise)
+      .mockImplementationOnce(() => latestSave.promise);
+
+    await interaction.click(screen.getByRole('button', { name: 'Configurações' }));
+    const balance = screen.getByLabelText('Saldo inicial');
+    await interaction.clear(balance);
+    await interaction.type(balance, '700');
+    await interaction.tab();
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledTimes(1), { timeout: 2500 });
+
+    await interaction.clear(balance);
+    await interaction.type(balance, '701');
+    await interaction.clear(balance);
+    await interaction.type(balance, '702');
+    await interaction.tab();
+    await new Promise((resolve) => window.setTimeout(resolve, 900));
+    expect(mocks.saveRemoteState).toHaveBeenCalledTimes(1);
+
+    await act(async () => firstSave.resolve());
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledTimes(2));
+    expect(mocks.saveRemoteState).toHaveBeenLastCalledWith(
+      'user-1',
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 702 }) }),
+    );
+    expect(screen.queryByText('Online Supabase')).not.toBeInTheDocument();
+
+    await act(async () => latestSave.resolve());
+    expect(await screen.findByText('Online Supabase')).toBeInTheDocument();
+  });
+
+  it('continues with the newest pending snapshot after the active save fails', async () => {
+    const interaction = userEvent.setup();
+    const firstSave = deferred();
+    const latestSave = deferred();
+    await renderRemoteApp();
+    mocks.saveRemoteState.mockClear();
+    mocks.saveRemoteState
+      .mockImplementationOnce(() => firstSave.promise)
+      .mockImplementationOnce(() => latestSave.promise);
+
+    await interaction.click(screen.getByRole('button', { name: 'Configurações' }));
+    const balance = screen.getByLabelText('Saldo inicial');
+    await interaction.clear(balance);
+    await interaction.type(balance, '800');
+    await interaction.tab();
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledTimes(1), { timeout: 2500 });
+    await interaction.clear(balance);
+    await interaction.type(balance, '801');
+    await interaction.tab();
+    await new Promise((resolve) => window.setTimeout(resolve, 900));
+
+    await act(async () => firstSave.reject(new TypeError('Failed to fetch')));
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledTimes(2));
+    expect(mocks.saveRemoteState).toHaveBeenLastCalledWith(
+      'user-1',
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 801 }) }),
+    );
+    expect(mocks.saveLocalState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 801 }) }),
+    );
+
+    await act(async () => latestSave.resolve());
+    expect(await screen.findByText('Online Supabase')).toBeInTheDocument();
+    expect(screen.queryByText('Erro de sincronização')).not.toBeInTheDocument();
+  });
+
+  it('manual retry uses the latest state and repeated clicks do not create concurrent saves', async () => {
+    const interaction = userEvent.setup();
+    await renderRemoteApp();
+    mocks.saveRemoteState.mockClear();
+    mocks.saveRemoteState.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    await interaction.click(screen.getByRole('button', { name: 'Configurações' }));
+    const balance = screen.getByLabelText('Saldo inicial');
+    await interaction.clear(balance);
+    await interaction.type(balance, '900');
+    await interaction.tab();
+    expect(await screen.findByText('Erro de sincronização', {}, { timeout: 2500 })).toBeInTheDocument();
+
+    const retrySave = deferred();
+    mocks.saveRemoteState.mockImplementationOnce(() => retrySave.promise);
+    await interaction.clear(balance);
+    await interaction.type(balance, '901');
+    await interaction.click(screen.getByRole('button', { name: 'Ver detalhes de sincronização' }));
+    const retryButton = screen.getByRole('button', { name: 'Tentar novamente' });
+    await interaction.click(retryButton);
+    await interaction.click(retryButton);
+    await interaction.click(retryButton);
+
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledTimes(2));
+    expect(mocks.saveRemoteState).toHaveBeenLastCalledWith(
+      'user-1',
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 901 }) }),
+    );
+    await act(async () => retrySave.resolve());
+    expect(await screen.findByText('Online Supabase')).toBeInTheDocument();
+  });
+
+  it('retries the latest unconfirmed state when the browser reports online', async () => {
+    const interaction = userEvent.setup();
+    await renderRemoteApp();
+    mocks.saveRemoteState.mockClear();
+    mocks.saveRemoteState.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    await interaction.click(screen.getByRole('button', { name: 'Configurações' }));
+    const balance = screen.getByLabelText('Saldo inicial');
+    await interaction.clear(balance);
+    await interaction.type(balance, '950');
+    await interaction.tab();
+    expect(await screen.findByText('Erro de sincronização', {}, { timeout: 2500 })).toBeInTheDocument();
+
+    mocks.saveRemoteState.mockResolvedValueOnce(undefined);
+    window.dispatchEvent(new Event('online'));
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledTimes(2));
+    expect(mocks.saveRemoteState).toHaveBeenLastCalledWith(
+      'user-1',
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 950 }) }),
+    );
+    expect(await screen.findByText('Online Supabase')).toBeInTheDocument();
+  });
+
   it('waits for a final save before logging out', async () => {
     const interaction = userEvent.setup();
     await renderRemoteApp();
@@ -158,6 +301,56 @@ describe('remote application lifecycle', () => {
     expect(order.slice(0, -1).every((step) => step === 'save')).toBe(true);
     expect(await screen.findByRole('heading', { name: 'Entrar' })).toBeInTheDocument();
   });
+
+  it('flushes the newest pending snapshot before logging out', async () => {
+    const interaction = userEvent.setup();
+    const firstSave = deferred();
+    const latestSave = deferred();
+    await renderRemoteApp();
+    mocks.saveRemoteState.mockClear();
+    mocks.saveRemoteState
+      .mockImplementationOnce(() => firstSave.promise)
+      .mockImplementationOnce(() => latestSave.promise);
+
+    await interaction.click(screen.getByRole('button', { name: 'Configurações' }));
+    const balance = screen.getByLabelText('Saldo inicial');
+    await interaction.clear(balance);
+    await interaction.type(balance, '1000');
+    await interaction.tab();
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledTimes(1), { timeout: 2500 });
+    await interaction.clear(balance);
+    await interaction.type(balance, '1001');
+
+    const logoutButtons = screen.getAllByRole('button', { name: 'Sair' });
+    await interaction.click(logoutButtons[logoutButtons.length - 1]);
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    await act(async () => firstSave.resolve());
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledTimes(2));
+    expect(mocks.saveRemoteState).toHaveBeenLastCalledWith(
+      'user-1',
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 1001 }) }),
+    );
+    expect(mocks.signOut).not.toHaveBeenCalled();
+
+    await act(async () => latestSave.resolve());
+    await waitFor(() => expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' }));
+  });
+
+  it('does not block logout indefinitely when the remote save never settles', async () => {
+    const interaction = userEvent.setup();
+    await renderRemoteApp();
+    mocks.saveRemoteState.mockClear();
+    mocks.saveRemoteState.mockImplementation(() => new Promise(() => undefined));
+
+    const logoutButtons = screen.getAllByRole('button', { name: 'Sair' });
+    await interaction.click(logoutButtons[logoutButtons.length - 1]);
+
+    await waitFor(
+      () => expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' }),
+      { timeout: 6500 },
+    );
+    expect(await screen.findByRole('heading', { name: 'Entrar' })).toBeInTheDocument();
+  }, 8000);
 
   it('logs out even when the final remote save fails and keeps the local backup', async () => {
     const interaction = userEvent.setup();

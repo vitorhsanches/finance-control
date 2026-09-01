@@ -65,6 +65,12 @@ function isMissingSessionError(error: unknown) {
 
 type SyncState = "local-only" | "syncing" | "online" | "error";
 
+type PendingRemoteSave = {
+  userId: string;
+  state: FinanceState;
+  revision: number;
+};
+
 export function App() {
   const [state, setState] = useState<FinanceState>(() => loadLocalState());
   const [activePage, setActivePage] = useState<PageKey>("dashboard");
@@ -84,6 +90,12 @@ export function App() {
   const [remoteReady, setRemoteReady] = useState(!isSupabaseConfigured);
   const saveTimer = useRef<number | null>(null);
   const activeSaveRef = useRef<Promise<boolean> | null>(null);
+  const pendingSaveRef = useRef<PendingRemoteSave | null>(null);
+  const currentRevisionRef = useRef(0);
+  const inFlightRevisionRef = useRef<number | null>(null);
+  const confirmedRevisionRef = useRef(0);
+  const pendingRevisionRef = useRef<number | null>(null);
+  const syncErrorRef = useRef<ReturnType<typeof getRemoteErrorDetails> | null>(null);
   const backupInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedMonth = state.settings.selectedMonth || currentMonth();
@@ -98,34 +110,72 @@ export function App() {
     setLastSavedAt(null);
   };
 
-  const runRemoteSave = useCallback((remoteUserId: string, remoteState: FinanceState) => {
+  const runRemoteSave = useCallback((remoteUserId: string, remoteState: FinanceState, revision: number) => {
+    if (
+      activeSaveRef.current
+      && inFlightRevisionRef.current === revision
+      && pendingRevisionRef.current === null
+    ) {
+      return activeSaveRef.current;
+    }
+
+    pendingSaveRef.current = { userId: remoteUserId, state: remoteState, revision };
+    pendingRevisionRef.current = revision;
+
     if (activeSaveRef.current) return activeSaveRef.current;
 
-    const savePromise = (async () => {
-      setSyncState("syncing");
-      setSyncError(null);
-      setShowSyncDetails(false);
-      setStatus("Salvando online...");
+    const drainPromise = (async () => {
+      let latestSaveSucceeded = false;
 
-      try {
-        await saveRemoteState(remoteUserId, remoteState);
-        setLastSavedAt(formatSaveTime());
-        setSyncState("online");
-        setStatus("Online Supabase");
-        return true;
-      } catch (error) {
-        setSyncError({ ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() });
-        setSyncState("error");
-        setStatus("Erro de sincronização");
-        return false;
+      while (pendingSaveRef.current) {
+        const request = pendingSaveRef.current;
+        pendingSaveRef.current = null;
+        pendingRevisionRef.current = null;
+        inFlightRevisionRef.current = request.revision;
+        setSyncState("syncing");
+        setStatus("Salvando online...");
+
+        try {
+          await saveRemoteState(request.userId, request.state);
+          confirmedRevisionRef.current = request.revision;
+          latestSaveSucceeded = true;
+          setLastSavedAt(formatSaveTime());
+
+          if (
+            confirmedRevisionRef.current === currentRevisionRef.current
+            && !pendingSaveRef.current
+          ) {
+            setSyncError(null);
+            syncErrorRef.current = null;
+            setShowSyncDetails(false);
+            setSyncState("online");
+            setStatus("Online Supabase");
+          } else {
+            setSyncState("syncing");
+            setStatus("Salvando online...");
+          }
+        } catch (error) {
+          latestSaveSucceeded = false;
+          const errorDetails = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+          syncErrorRef.current = errorDetails;
+          setSyncError(errorDetails);
+          setSyncState("error");
+          setStatus("Erro de sincronização");
+        } finally {
+          inFlightRevisionRef.current = null;
+        }
       }
+
+      activeSaveRef.current = null;
+      return latestSaveSucceeded
+        && confirmedRevisionRef.current === currentRevisionRef.current;
     })();
 
-    activeSaveRef.current = savePromise;
-    void savePromise.finally(() => {
-      if (activeSaveRef.current === savePromise) activeSaveRef.current = null;
+    activeSaveRef.current = drainPromise;
+    void drainPromise.finally(() => {
+      if (activeSaveRef.current === drainPromise) activeSaveRef.current = null;
     });
-    return savePromise;
+    return drainPromise;
   }, []);
 
   useEffect(() => {
@@ -192,7 +242,9 @@ export function App() {
 
     if (!supabase || !userId || !remoteReady) return;
 
-    setSyncState("local-only");
+    currentRevisionRef.current += 1;
+    const revision = currentRevisionRef.current;
+    setSyncState(syncErrorRef.current ? "error" : "syncing");
 
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current);
@@ -229,7 +281,7 @@ export function App() {
     }
 
     saveTimer.current = window.setTimeout(() => {
-      void runRemoteSave(userId, state);
+      void runRemoteSave(userId, state, revision);
     }, 800);
 
     return () => {
@@ -238,6 +290,21 @@ export function App() {
       }
     };
   }, [state, userId, remoteReady, runRemoteSave]);
+
+  useEffect(() => {
+    const retryWhenOnline = () => {
+      if (
+        userId
+        && remoteReady
+        && confirmedRevisionRef.current !== currentRevisionRef.current
+      ) {
+        void runRemoteSave(userId, state, currentRevisionRef.current);
+      }
+    };
+
+    window.addEventListener("online", retryWhenOnline);
+    return () => window.removeEventListener("online", retryWhenOnline);
+  }, [remoteReady, runRemoteSave, state, userId]);
 
   const updateState = useCallback(
     (updater: (prev: FinanceState) => FinanceState) =>
@@ -405,7 +472,23 @@ export function App() {
       }
 
       if (userId && remoteReady) {
-        await runRemoteSave(userId, state);
+        try {
+          await withTimeout(
+            runRemoteSave(userId, state, currentRevisionRef.current),
+            5000,
+            "Tempo limite ao salvar antes de sair. Backup local mantido neste navegador.",
+          );
+        } catch (error) {
+          const errorDetails = {
+            message: error instanceof Error
+              ? error.message
+              : "Não foi possível sincronizar antes de sair.",
+            timestamp: new Date().toISOString(),
+          };
+          syncErrorRef.current = errorDetails;
+          setSyncError(errorDetails);
+          setSyncState("error");
+        }
       }
 
       setStatus("Saindo...");
@@ -467,7 +550,9 @@ export function App() {
   const syncTone = syncState === "error" ? "error" : syncState === "syncing" ? "syncing" : "ready";
   const SyncIcon = syncState === "error" ? AlertCircle : syncState === "syncing" ? LoaderCircle : CheckCircle2;
   const retrySync = () => {
-    if (userId && remoteReady && syncState !== "syncing") void runRemoteSave(userId, state);
+    if (userId && remoteReady) {
+      void runRemoteSave(userId, state, currentRevisionRef.current);
+    }
   };
     if (isSupabaseConfigured && !userId) {
       return <AuthScreen />;

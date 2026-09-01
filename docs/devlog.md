@@ -277,3 +277,11 @@ Changed files:
 -  M src/App.tsx
 -  M src/index.css
 -  M src/lib/storage.ts
+
+## 2026-09-01 10:41
+- fix: coalescer autosaves e preservar a revisão mais recente
+
+Changed files:
+-  M src/App.remote.test.tsx
+-  M src/App.tsx
+-  M src/lib/storage.test.ts

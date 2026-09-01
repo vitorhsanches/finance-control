@@ -128,6 +128,34 @@ describe('remote storage', () => {
     await expect(storage.saveRemoteState('user-1', state)).resolves.toBeUndefined();
   });
 
+  it('classifies Failed to fetch at the transactions upsert and keeps the queue usable', async () => {
+    const state = emptyState();
+    state.transactions = [{ id: 't1', date: '2026-07-10', description: 'Teste', type: 'expense', category: 'Casa', amount: 1, paymentMethod: 'Pix', accountOrCard: 'Conta', essential: false, paid: true }];
+    let shouldFail = true;
+    mock.setResolver((call) => {
+      if (call.table === 'transactions' && call.operation === 'upsert' && shouldFail) {
+        shouldFail = false;
+        return { error: new TypeError('Failed to fetch') };
+      }
+      return { data: [], error: null, count: 0 };
+    });
+    storage.saveLocalState(state);
+    const localBackup = localStorage.getItem(storage.LOCAL_STORAGE_KEY);
+
+    const firstSave = storage.saveRemoteState('user-1', state);
+    await expect(firstSave).rejects.toThrow('Failed to fetch');
+    await firstSave.catch((error: unknown) => {
+      expect(storage.getRemoteErrorDetails(error)).toMatchObject({
+        table: 'transactions',
+        operation: 'upsert',
+        message: 'Failed to fetch',
+      });
+      expect(storage.getRemoteErrorDetails(error).code).toBeUndefined();
+    });
+    expect(localStorage.getItem(storage.LOCAL_STORAGE_KEY)).toBe(localBackup);
+    await expect(storage.saveRemoteState('user-1', state)).resolves.toBeUndefined();
+  });
+
   it('deletes only the transaction matching both user_id and id and it stays deleted after reload', async () => {
     const remoteTransactions = [
       { user_id: 'user-1', id: 'shared-id', date: '2026-07-10', description: 'User one', type: 'expense', category: 'Casa', amount: 10, payment_method: 'Pix', account_or_card: 'Conta', essential: false, paid: true },
