@@ -7,7 +7,20 @@ export { isSupabaseConfigured, supabase } from './supabaseClient';
 
 export const LOCAL_STORAGE_KEY = 'finance-control-react-v3';
 const LEGACY_LOCAL_STORAGE_KEY = 'finance-control-react-v1';
+const USER_LOCAL_STORAGE_PREFIX = 'finance-control-react-v3:user:';
+const USER_SYNC_METADATA_PREFIX = 'finance-control-sync-v1:user:';
+export const LOCAL_SYNC_SCHEMA_VERSION = 1;
 let remoteSaveQueue: Promise<void> = Promise.resolve();
+
+export type LocalSyncMetadata = {
+  userId: string;
+  localRevision: number;
+  confirmedRevision: number;
+  dirty: boolean;
+  updatedAt: string;
+  lastConfirmedAt: string | null;
+  schemaVersion: number;
+};
 
 export type RemoteOperation = 'select' | 'upsert' | 'delete' | 'insert';
 
@@ -49,6 +62,131 @@ export function loadLocalState(): FinanceState {
 
 export function saveLocalState(state: FinanceState) {
   localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+}
+
+function userStorageSuffix(userId: string) {
+  return encodeURIComponent(userId.trim());
+}
+
+export function getUserLocalStateKey(userId: string) {
+  return `${USER_LOCAL_STORAGE_PREFIX}${userStorageSuffix(userId)}`;
+}
+
+export function getUserSyncMetadataKey(userId: string) {
+  return `${USER_SYNC_METADATA_PREFIX}${userStorageSuffix(userId)}`;
+}
+
+export function loadUserLocalState(userId: string): FinanceState | null {
+  const raw = localStorage.getItem(getUserLocalStateKey(userId));
+  if (!raw) return null;
+  try {
+    return normalizeState(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+export function loadUserSyncMetadata(userId: string): LocalSyncMetadata | null {
+  const raw = localStorage.getItem(getUserSyncMetadataKey(userId));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<LocalSyncMetadata>;
+    if (
+      parsed.userId !== userId
+      || parsed.schemaVersion !== LOCAL_SYNC_SCHEMA_VERSION
+      || typeof parsed.localRevision !== 'number'
+      || typeof parsed.confirmedRevision !== 'number'
+      || typeof parsed.dirty !== 'boolean'
+      || typeof parsed.updatedAt !== 'string'
+      || !(typeof parsed.lastConfirmedAt === 'string' || parsed.lastConfirmedAt === null)
+    ) return null;
+
+    return {
+      userId,
+      localRevision: Math.max(0, Math.floor(parsed.localRevision)),
+      confirmedRevision: Math.max(0, Math.floor(parsed.confirmedRevision)),
+      dirty: parsed.dirty,
+      updatedAt: parsed.updatedAt,
+      lastConfirmedAt: parsed.lastConfirmedAt,
+      schemaVersion: LOCAL_SYNC_SCHEMA_VERSION,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveUserLocalDirty(
+  userId: string,
+  state: FinanceState,
+  localRevision: number,
+  confirmedRevision: number,
+): LocalSyncMetadata {
+  const previous = loadUserSyncMetadata(userId);
+  const metadata: LocalSyncMetadata = {
+    userId,
+    localRevision: Math.max(0, Math.floor(localRevision)),
+    confirmedRevision: Math.max(0, Math.floor(confirmedRevision)),
+    dirty: true,
+    updatedAt: new Date().toISOString(),
+    lastConfirmedAt: previous?.lastConfirmedAt || null,
+    schemaVersion: LOCAL_SYNC_SCHEMA_VERSION,
+  };
+  localStorage.setItem(getUserSyncMetadataKey(userId), JSON.stringify(metadata));
+  localStorage.setItem(getUserLocalStateKey(userId), JSON.stringify(normalizeState(state)));
+  return metadata;
+}
+
+export function saveUserLocalConfirmed(
+  userId: string,
+  state: FinanceState,
+  revision: number,
+): LocalSyncMetadata {
+  const now = new Date().toISOString();
+  const normalizedRevision = Math.max(0, Math.floor(revision));
+  const previous = loadUserSyncMetadata(userId);
+  if (previous && previous.localRevision > normalizedRevision) {
+    const metadata: LocalSyncMetadata = {
+      ...previous,
+      confirmedRevision: Math.max(previous.confirmedRevision, normalizedRevision),
+      dirty: true,
+      lastConfirmedAt: now,
+      schemaVersion: LOCAL_SYNC_SCHEMA_VERSION,
+    };
+    localStorage.setItem(getUserSyncMetadataKey(userId), JSON.stringify(metadata));
+    return metadata;
+  }
+
+  localStorage.setItem(getUserLocalStateKey(userId), JSON.stringify(normalizeState(state)));
+  const metadata: LocalSyncMetadata = {
+    userId,
+    localRevision: normalizedRevision,
+    confirmedRevision: normalizedRevision,
+    dirty: false,
+    updatedAt: now,
+    lastConfirmedAt: now,
+    schemaVersion: LOCAL_SYNC_SCHEMA_VERSION,
+  };
+  localStorage.setItem(getUserSyncMetadataKey(userId), JSON.stringify(metadata));
+  return metadata;
+}
+
+export function migrateLegacyLocalStateForUser(
+  userId: string,
+  remoteState: FinanceState,
+  revision: number,
+): boolean {
+  if (loadUserLocalState(userId) || loadUserSyncMetadata(userId)) return false;
+  const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+  if (!raw) return false;
+  try {
+    const legacy = normalizeState(JSON.parse(raw));
+    const remote = normalizeState(remoteState);
+    if (JSON.stringify(legacy) !== JSON.stringify(remote)) return false;
+    saveUserLocalConfirmed(userId, legacy, revision);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function getSession(): Promise<Session | null> {

@@ -285,3 +285,14 @@ Changed files:
 -  M src/App.remote.test.tsx
 -  M src/App.tsx
 -  M src/lib/storage.test.ts
+
+## 2026-09-01 11:09
+- fix: persistir dirty state por usuário e reconciliar no boot
+
+Changed files:
+-  M src/App.remote.test.tsx
+-  M src/App.test.tsx
+-  M src/App.tsx
+-  M src/AuthScreen.test.tsx
+-  M src/lib/storage.test.ts
+-  M src/lib/storage.ts

@@ -29,6 +29,86 @@ describe('local storage', () => {
     localStorage.setItem(storage.LOCAL_STORAGE_KEY, '{invalid');
     expect(storage.loadLocalState().transactions.length).toBeGreaterThan(0);
   });
+
+  it('stores dirty snapshots and metadata separately for each user', () => {
+    const stateA = emptyState();
+    stateA.settings.startingBalance = 111;
+    const stateB = emptyState();
+    stateB.settings.startingBalance = 222;
+
+    storage.saveUserLocalDirty('user-a', stateA, 3, 2);
+    storage.saveUserLocalConfirmed('user-b', stateB, 7);
+
+    expect(storage.loadUserLocalState('user-a')?.settings.startingBalance).toBe(111);
+    expect(storage.loadUserLocalState('user-b')?.settings.startingBalance).toBe(222);
+    expect(storage.loadUserSyncMetadata('user-a')).toMatchObject({
+      userId: 'user-a', localRevision: 3, confirmedRevision: 2, dirty: true, schemaVersion: 1,
+    });
+    expect(storage.loadUserSyncMetadata('user-b')).toMatchObject({
+      userId: 'user-b', localRevision: 7, confirmedRevision: 7, dirty: false, schemaVersion: 1,
+    });
+  });
+
+  it('marks dirty false only after a confirmed snapshot is recorded', () => {
+    const state = emptyState();
+    storage.saveUserLocalDirty('user-a', state, 4, 3);
+    expect(storage.loadUserSyncMetadata('user-a')?.dirty).toBe(true);
+
+    const confirmed = storage.saveUserLocalConfirmed('user-a', state, 4);
+    expect(confirmed).toMatchObject({ localRevision: 4, confirmedRevision: 4, dirty: false });
+    expect(confirmed.lastConfirmedAt).toEqual(expect.any(String));
+  });
+
+  it('does not let an older confirmation overwrite a newer dirty snapshot', () => {
+    const older = emptyState();
+    older.settings.startingBalance = 100;
+    const newer = emptyState();
+    newer.settings.startingBalance = 200;
+    storage.saveUserLocalDirty('user-a', newer, 5, 3);
+
+    const metadata = storage.saveUserLocalConfirmed('user-a', older, 4);
+
+    expect(storage.loadUserLocalState('user-a')?.settings.startingBalance).toBe(200);
+    expect(metadata).toMatchObject({ localRevision: 5, confirmedRevision: 4, dirty: true });
+  });
+
+  it('stores no session, token, credentials, headers, or financial state in sync metadata', () => {
+    storage.saveUserLocalDirty('user-a', emptyState(), 2, 1);
+    const raw = localStorage.getItem(storage.getUserSyncMetadataKey('user-a')) || '';
+    const metadata = JSON.parse(raw);
+
+    expect(Object.keys(metadata).sort()).toEqual([
+      'confirmedRevision', 'dirty', 'lastConfirmedAt', 'localRevision', 'schemaVersion', 'updatedAt', 'userId',
+    ]);
+    expect(raw).not.toMatch(/jwt|token|session|authorization|header|credential|transactions|settings/i);
+  });
+
+  it('migrates an equivalent v3 backup safely and idempotently without deleting it', () => {
+    const legacy = emptyState();
+    legacy.settings.startingBalance = 321;
+    storage.saveLocalState(legacy);
+    const original = localStorage.getItem(storage.LOCAL_STORAGE_KEY);
+
+    expect(storage.migrateLegacyLocalStateForUser('user-a', legacy, 1)).toBe(true);
+    expect(storage.loadUserLocalState('user-a')?.settings.startingBalance).toBe(321);
+    expect(storage.loadUserSyncMetadata('user-a')).toMatchObject({ dirty: false, localRevision: 1, confirmedRevision: 1 });
+    expect(localStorage.getItem(storage.LOCAL_STORAGE_KEY)).toBe(original);
+    expect(storage.migrateLegacyLocalStateForUser('user-a', legacy, 2)).toBe(false);
+    expect(storage.loadUserSyncMetadata('user-a')?.localRevision).toBe(1);
+  });
+
+  it('does not associate a different legacy v3 backup with an authenticated user', () => {
+    const legacy = emptyState();
+    legacy.settings.startingBalance = 111;
+    const remote = emptyState();
+    remote.settings.startingBalance = 222;
+    storage.saveLocalState(legacy);
+
+    expect(storage.migrateLegacyLocalStateForUser('user-b', remote, 1)).toBe(false);
+    expect(storage.loadUserLocalState('user-b')).toBeNull();
+    expect(storage.loadUserSyncMetadata('user-b')).toBeNull();
+    expect(storage.loadLocalState().settings.startingBalance).toBe(111);
+  });
 });
 
 describe('remote storage', () => {

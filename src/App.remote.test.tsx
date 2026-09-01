@@ -6,6 +6,11 @@ import { emptyState } from './data/sample';
 const mocks = vi.hoisted(() => ({
   loadLocalState: vi.fn(),
   saveLocalState: vi.fn(),
+  loadUserLocalState: vi.fn(),
+  loadUserSyncMetadata: vi.fn(),
+  saveUserLocalDirty: vi.fn(),
+  saveUserLocalConfirmed: vi.fn(),
+  migrateLegacyLocalStateForUser: vi.fn(),
   loadRemoteState: vi.fn(),
   saveRemoteState: vi.fn(),
   getRemoteErrorDetails: vi.fn(),
@@ -22,6 +27,11 @@ vi.mock('./lib/storage', () => ({
   isSupabaseConfigured: true,
   loadLocalState: mocks.loadLocalState,
   saveLocalState: mocks.saveLocalState,
+  loadUserLocalState: mocks.loadUserLocalState,
+  loadUserSyncMetadata: mocks.loadUserSyncMetadata,
+  saveUserLocalDirty: mocks.saveUserLocalDirty,
+  saveUserLocalConfirmed: mocks.saveUserLocalConfirmed,
+  migrateLegacyLocalStateForUser: mocks.migrateLegacyLocalStateForUser,
   loadRemoteState: mocks.loadRemoteState,
   saveRemoteState: mocks.saveRemoteState,
   getRemoteErrorDetails: mocks.getRemoteErrorDetails,
@@ -78,6 +88,11 @@ beforeEach(() => {
   mocks.loadRemoteState.mockResolvedValue(state);
   mocks.loadProfile.mockResolvedValue({ displayName: 'Ana' });
   mocks.saveRemoteState.mockResolvedValue(undefined);
+  mocks.loadUserLocalState.mockReturnValue(null);
+  mocks.loadUserSyncMetadata.mockReturnValue(null);
+  mocks.saveUserLocalDirty.mockImplementation(() => undefined);
+  mocks.saveUserLocalConfirmed.mockImplementation(() => undefined);
+  mocks.migrateLegacyLocalStateForUser.mockReturnValue(false);
   mocks.getRemoteErrorDetails.mockImplementation((error: unknown) => ({ message: error instanceof Error ? error.message : 'Erro remoto desconhecido.' }));
   mocks.deleteRemoteTransaction.mockResolvedValue(undefined);
   mocks.deleteRemoteFutureBill.mockResolvedValue(undefined);
@@ -92,8 +107,10 @@ async function renderRemoteApp() {
   const result = render(<App />);
   expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
   await waitFor(() => expect(mocks.loadRemoteState).toHaveBeenCalledWith('user-1'));
-  await waitFor(() => expect(mocks.saveLocalState).toHaveBeenCalledWith(
+  await waitFor(() => expect(mocks.saveUserLocalConfirmed).toHaveBeenCalledWith(
+    'user-1',
     expect.objectContaining({ settings: expect.objectContaining({ selectedMonth: '2026-07' }) }),
+    expect.any(Number),
   ));
   return result;
 }
@@ -129,8 +146,11 @@ describe('remote application lifecycle', () => {
     await interaction.tab();
 
     expect(await screen.findByText('Erro de sincronização', {}, { timeout: 2500 })).toBeInTheDocument();
-    expect(mocks.saveLocalState).toHaveBeenLastCalledWith(
-      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 700 }) })
+    expect(mocks.saveUserLocalDirty).toHaveBeenLastCalledWith(
+      'user-1',
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 700 }) }),
+      expect.any(Number),
+      expect.any(Number),
     );
     await interaction.click(screen.getByRole('button', { name: 'Ver detalhes de sincronização' }));
     expect(screen.getAllByText('Failed to fetch').length).toBeGreaterThan(0);
@@ -220,8 +240,11 @@ describe('remote application lifecycle', () => {
       'user-1',
       expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 801 }) }),
     );
-    expect(mocks.saveLocalState).toHaveBeenLastCalledWith(
+    expect(mocks.saveUserLocalDirty).toHaveBeenLastCalledWith(
+      'user-1',
       expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 801 }) }),
+      expect.any(Number),
+      expect.any(Number),
     );
 
     await act(async () => latestSave.resolve());
@@ -282,6 +305,176 @@ describe('remote application lifecycle', () => {
       expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 950 }) }),
     );
     expect(await screen.findByText('Online Supabase')).toBeInTheDocument();
+  });
+
+  it('preserves a dirty user snapshot at boot and confirms it instead of loading older remote data', async () => {
+    const interaction = userEvent.setup();
+    const local = emptyState();
+    local.settings.selectedMonth = '2026-07';
+    local.settings.startingBalance = 777;
+    const reconciliation = deferred();
+    mocks.loadUserLocalState.mockReturnValue(local);
+    mocks.loadUserSyncMetadata.mockReturnValue({
+      userId: 'user-1', localRevision: 5, confirmedRevision: 4, dirty: true,
+      updatedAt: '2026-09-01T10:00:00.000Z', lastConfirmedAt: '2026-09-01T09:00:00.000Z', schemaVersion: 1,
+    });
+    mocks.saveRemoteState.mockImplementation(() => reconciliation.promise);
+
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
+    await interaction.click(screen.getByRole('button', { name: 'Configurações' }));
+    expect(screen.getByLabelText('Saldo inicial')).toHaveValue('777');
+    expect(mocks.loadRemoteState).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledWith('user-1', local));
+    expect(screen.queryByText('Online Supabase')).not.toBeInTheDocument();
+
+    await act(async () => reconciliation.resolve());
+    expect(await screen.findByText('Online Supabase')).toBeInTheDocument();
+    expect(mocks.saveUserLocalConfirmed).toHaveBeenLastCalledWith('user-1', local, 5);
+  });
+
+  it('keeps dirty state after reconciliation failure and retries it on window online', async () => {
+    const local = emptyState();
+    local.settings.selectedMonth = '2026-07';
+    local.settings.startingBalance = 778;
+    mocks.loadUserLocalState.mockReturnValue(local);
+    mocks.loadUserSyncMetadata.mockReturnValue({
+      userId: 'user-1', localRevision: 6, confirmedRevision: 5, dirty: true,
+      updatedAt: '2026-09-01T10:00:00.000Z', lastConfirmedAt: '2026-09-01T09:00:00.000Z', schemaVersion: 1,
+    });
+    mocks.saveRemoteState.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    render(<App />);
+    expect(await screen.findByText('Erro de sincronização', {}, { timeout: 2500 })).toBeInTheDocument();
+    expect(mocks.saveUserLocalDirty).toHaveBeenCalledWith('user-1', local, 6, 5);
+    expect(mocks.saveUserLocalConfirmed).not.toHaveBeenCalledWith('user-1', local, 6);
+
+    mocks.saveRemoteState.mockResolvedValueOnce(undefined);
+    window.dispatchEvent(new Event('online'));
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('Online Supabase')).toBeInTheDocument();
+    expect(mocks.saveUserLocalConfirmed).toHaveBeenLastCalledWith('user-1', local, 6);
+  });
+
+  it('uses a clean per-user backup while remote is unavailable and reloads remote on online', async () => {
+    const interaction = userEvent.setup();
+    const local = emptyState();
+    local.settings.selectedMonth = '2026-07';
+    local.settings.startingBalance = 410;
+    const remote = emptyState();
+    remote.settings.selectedMonth = '2026-07';
+    remote.settings.startingBalance = 420;
+    mocks.loadUserLocalState.mockReturnValue(local);
+    mocks.loadUserSyncMetadata.mockReturnValue({
+      userId: 'user-1', localRevision: 2, confirmedRevision: 2, dirty: false,
+      updatedAt: '2026-09-01T10:00:00.000Z', lastConfirmedAt: '2026-09-01T10:00:00.000Z', schemaVersion: 1,
+    });
+    mocks.loadRemoteState
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(remote);
+
+    render(<App />);
+    expect(await screen.findByText('Erro de sincronização')).toBeInTheDocument();
+    await interaction.click(screen.getByRole('button', { name: 'Configurações' }));
+    expect(screen.getByLabelText('Saldo inicial')).toHaveValue('410');
+    expect(mocks.saveRemoteState).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new Event('online'));
+    await waitFor(() => expect(screen.getByLabelText('Saldo inicial')).toHaveValue('420'));
+    expect(await screen.findByText('Online Supabase')).toBeInTheDocument();
+  });
+
+  it('preserves a failed edit across an authenticated reload and retries the local snapshot', async () => {
+    const interaction = userEvent.setup();
+    const states = new Map<string, ReturnType<typeof emptyState>>();
+    const metadata = new Map<string, { userId: string; localRevision: number; confirmedRevision: number; dirty: boolean; updatedAt: string; lastConfirmedAt: string | null; schemaVersion: number }>();
+    mocks.loadUserLocalState.mockImplementation((id: string) => states.get(id) || null);
+    mocks.loadUserSyncMetadata.mockImplementation((id: string) => metadata.get(id) || null);
+    mocks.saveUserLocalDirty.mockImplementation((id: string, savedState: ReturnType<typeof emptyState>, localRevision: number, confirmedRevision: number) => {
+      states.set(id, savedState);
+      metadata.set(id, { userId: id, localRevision, confirmedRevision, dirty: true, updatedAt: new Date().toISOString(), lastConfirmedAt: null, schemaVersion: 1 });
+    });
+    mocks.saveUserLocalConfirmed.mockImplementation((id: string, savedState: ReturnType<typeof emptyState>, revision: number) => {
+      states.set(id, savedState);
+      metadata.set(id, { userId: id, localRevision: revision, confirmedRevision: revision, dirty: false, updatedAt: new Date().toISOString(), lastConfirmedAt: new Date().toISOString(), schemaVersion: 1 });
+    });
+
+    const firstRender = render(<App />);
+    await waitFor(() => expect(mocks.saveUserLocalConfirmed).toHaveBeenCalled());
+    mocks.saveRemoteState.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await interaction.click(screen.getByRole('button', { name: 'Configurações' }));
+    const balance = screen.getByLabelText('Saldo inicial');
+    await interaction.clear(balance);
+    await interaction.type(balance, '779');
+    await interaction.tab();
+    expect(await screen.findByText('Erro de sincronização', {}, { timeout: 2500 })).toBeInTheDocument();
+    expect(metadata.get('user-1')?.dirty).toBe(true);
+    firstRender.unmount();
+
+    mocks.saveRemoteState.mockResolvedValueOnce(undefined);
+    const remoteLoadsBeforeReload = mocks.loadRemoteState.mock.calls.length;
+    render(<App />);
+    await interaction.click(await screen.findByRole('button', { name: 'Configurações' }));
+    expect(screen.getByLabelText('Saldo inicial')).toHaveValue('779');
+    expect(mocks.loadRemoteState.mock.calls.length).toBe(remoteLoadsBeforeReload);
+    await waitFor(() => expect(metadata.get('user-1')?.dirty).toBe(false));
+  });
+
+  it('isolates dirty snapshots across users and restores user A when they return', async () => {
+    const interaction = userEvent.setup();
+    const stateA = emptyState();
+    stateA.settings.selectedMonth = '2026-07';
+    stateA.settings.startingBalance = 111;
+    const stateB = emptyState();
+    stateB.settings.selectedMonth = '2026-07';
+    stateB.settings.startingBalance = 222;
+    const dirtyMetadata = {
+      userId: 'user-1', localRevision: 3, confirmedRevision: 2, dirty: true,
+      updatedAt: '2026-09-01T10:00:00.000Z', lastConfirmedAt: null, schemaVersion: 1,
+    };
+    let authCallback!: (_event: string, session: { user: { id: string; email?: string } } | null) => void;
+    mocks.onAuthStateChange.mockImplementation((callback: typeof authCallback) => {
+      authCallback = callback;
+      return { data: { subscription: { unsubscribe: vi.fn() } } };
+    });
+    mocks.loadUserLocalState.mockImplementation((id: string) => id === 'user-1' ? stateA : null);
+    mocks.loadUserSyncMetadata.mockImplementation((id: string) => id === 'user-1' ? dirtyMetadata : null);
+    mocks.loadRemoteState.mockImplementation(async (id: string) => id === 'user-2' ? stateB : emptyState());
+    mocks.saveRemoteState.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    render(<App />);
+    await waitFor(() => expect(mocks.saveRemoteState).toHaveBeenCalledWith('user-1', stateA));
+    await act(async () => authCallback('SIGNED_IN', { user: { id: 'user-2', email: 'b@example.com' } }));
+    await interaction.click(screen.getByRole('button', { name: 'Configurações' }));
+    await waitFor(() => expect(screen.getByLabelText('Saldo inicial')).toHaveValue('222'));
+    expect(mocks.saveRemoteState).not.toHaveBeenCalledWith('user-2', stateA);
+
+    await act(async () => authCallback('SIGNED_IN', { user: { id: 'user-1', email: 'a@example.com' } }));
+    await waitFor(() => expect(screen.getByLabelText('Saldo inicial')).toHaveValue('111'));
+  });
+
+  it('does not clear a dirty per-user backup during logout', async () => {
+    const interaction = userEvent.setup();
+    const local = emptyState();
+    local.settings.selectedMonth = '2026-07';
+    local.settings.startingBalance = 880;
+    mocks.loadUserLocalState.mockReturnValue(local);
+    mocks.loadUserSyncMetadata.mockReturnValue({
+      userId: 'user-1', localRevision: 8, confirmedRevision: 7, dirty: true,
+      updatedAt: '2026-09-01T10:00:00.000Z', lastConfirmedAt: null, schemaVersion: 1,
+    });
+    mocks.saveRemoteState.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    render(<App />);
+    expect(await screen.findByText('Erro de sincronização')).toBeInTheDocument();
+    mocks.saveUserLocalConfirmed.mockClear();
+    const logoutButtons = screen.getAllByRole('button', { name: 'Sair' });
+    await interaction.click(logoutButtons[logoutButtons.length - 1]);
+
+    await waitFor(() => expect(mocks.signOut).toHaveBeenCalled());
+    expect(await screen.findByRole('heading', { name: 'Entrar' })).toBeInTheDocument();
+    expect(mocks.saveUserLocalDirty).toHaveBeenCalledWith('user-1', local, 8, 7);
+    expect(mocks.saveUserLocalConfirmed).not.toHaveBeenCalledWith('user-1', local, 8);
   });
 
   it('waits for a final save before logging out', async () => {
@@ -355,7 +548,7 @@ describe('remote application lifecycle', () => {
   it('logs out even when the final remote save fails and keeps the local backup', async () => {
     const interaction = userEvent.setup();
     await renderRemoteApp();
-    mocks.saveLocalState.mockClear();
+    mocks.saveUserLocalConfirmed.mockClear();
     mocks.saveRemoteState.mockRejectedValue(new Error('save unavailable'));
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
@@ -364,8 +557,10 @@ describe('remote application lifecycle', () => {
 
     await waitFor(() => expect(mocks.signOut).toHaveBeenCalled());
     expect(await screen.findByRole('heading', { name: 'Entrar' })).toBeInTheDocument();
-    expect(mocks.saveLocalState).not.toHaveBeenCalledWith(
-      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 0 }) })
+    expect(mocks.saveUserLocalConfirmed).not.toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 0 }) }),
+      expect.any(Number),
     );
     errorSpy.mockRestore();
   });
@@ -373,7 +568,7 @@ describe('remote application lifecycle', () => {
   it('clears local authentication when the remote session has already expired', async () => {
     const interaction = userEvent.setup();
     await renderRemoteApp();
-    mocks.saveLocalState.mockClear();
+    mocks.saveUserLocalConfirmed.mockClear();
     mocks.signOut.mockResolvedValue({
       error: Object.assign(new Error('Auth session missing!'), { name: 'AuthSessionMissingError' })
     });
@@ -383,8 +578,10 @@ describe('remote application lifecycle', () => {
     await interaction.click(logoutButtons[logoutButtons.length - 1]);
 
     expect(await screen.findByRole('heading', { name: 'Entrar' })).toBeInTheDocument();
-    expect(mocks.saveLocalState).not.toHaveBeenCalledWith(
-      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 0 }) })
+    expect(mocks.saveUserLocalConfirmed).not.toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 0 }) }),
+      expect.any(Number),
     );
     warningSpy.mockRestore();
   });
@@ -392,7 +589,7 @@ describe('remote application lifecycle', () => {
   it('keeps the local backup and reports a real sign-out failure', async () => {
     const interaction = userEvent.setup();
     await renderRemoteApp();
-    mocks.saveLocalState.mockClear();
+    mocks.saveUserLocalConfirmed.mockClear();
     mocks.signOut.mockResolvedValue({ error: new Error('Logout service unavailable') });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
@@ -403,8 +600,10 @@ describe('remote application lifecycle', () => {
     await interaction.click(screen.getByRole('button', { name: 'Ver detalhes de sincronização' }));
     expect(screen.getAllByText(/Logout service unavailable/).length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
-    expect(mocks.saveLocalState).not.toHaveBeenCalledWith(
-      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 0 }) })
+    expect(mocks.saveUserLocalConfirmed).not.toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ settings: expect.objectContaining({ startingBalance: 0 }) }),
+      expect.any(Number),
     );
     errorSpy.mockRestore();
   });

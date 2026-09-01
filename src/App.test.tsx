@@ -14,6 +14,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock('./lib/storage', () => ({
   loadLocalState: mocks.loadLocalState,
   saveLocalState: mocks.saveLocalState,
+  loadUserLocalState: vi.fn(),
+  loadUserSyncMetadata: vi.fn(),
+  saveUserLocalDirty: vi.fn(),
+  saveUserLocalConfirmed: vi.fn(),
+  migrateLegacyLocalStateForUser: vi.fn(),
   loadRemoteState: vi.fn(),
   saveRemoteState: vi.fn(),
   deleteRemoteTransaction: vi.fn(),

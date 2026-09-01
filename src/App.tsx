@@ -6,8 +6,10 @@ import {
 import type { FinanceState, PageKey } from "./types";
 import { emptyState, normalizeState } from "./data/sample";
 import {
-  isSupabaseConfigured, loadLocalState, loadProfile, loadRemoteState,
-  deleteRemoteFutureBill, deleteRemoteFutureBillsFrom, deleteRemoteTransaction, getRemoteErrorDetails, saveLocalState, saveProfile, saveRemoteState, supabase,
+  isSupabaseConfigured, loadLocalState, loadProfile, loadRemoteState, loadUserLocalState, loadUserSyncMetadata,
+  deleteRemoteFutureBill, deleteRemoteFutureBillsFrom, deleteRemoteTransaction, getRemoteErrorDetails,
+  migrateLegacyLocalStateForUser, saveLocalState, saveProfile, saveRemoteState,
+  saveUserLocalConfirmed, saveUserLocalDirty, supabase,
 } from "./lib/storage";
 import { currentMonth } from "./lib/utils";
 import { BudgetsPage } from "./pages/BudgetsPage";
@@ -96,11 +98,19 @@ export function App() {
   const confirmedRevisionRef = useRef(0);
   const pendingRevisionRef = useRef<number | null>(null);
   const syncErrorRef = useRef<ReturnType<typeof getRemoteErrorDetails> | null>(null);
+  const activeUserIdRef = useRef<string | null>(null);
+  const bootStateRef = useRef<FinanceState | null>(null);
+  const remoteLoadPendingRef = useRef(false);
   const backupInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedMonth = state.settings.selectedMonth || currentMonth();
 
   const clearAuthenticatedSession = () => {
+    activeUserIdRef.current = null;
+    remoteLoadPendingRef.current = false;
+    currentRevisionRef.current = 0;
+    confirmedRevisionRef.current = 0;
+    pendingRevisionRef.current = null;
     setRemoteReady(false);
     setUserId(null);
     setEmail(null);
@@ -137,30 +147,36 @@ export function App() {
 
         try {
           await saveRemoteState(request.userId, request.state);
-          confirmedRevisionRef.current = request.revision;
           latestSaveSucceeded = true;
-          setLastSavedAt(formatSaveTime());
+          saveUserLocalConfirmed(request.userId, request.state, request.revision);
 
-          if (
-            confirmedRevisionRef.current === currentRevisionRef.current
-            && !pendingSaveRef.current
-          ) {
-            setSyncError(null);
-            syncErrorRef.current = null;
-            setShowSyncDetails(false);
-            setSyncState("online");
-            setStatus("Online Supabase");
-          } else {
-            setSyncState("syncing");
-            setStatus("Salvando online...");
+          if (activeUserIdRef.current === request.userId) {
+            confirmedRevisionRef.current = request.revision;
+            setLastSavedAt(formatSaveTime());
+
+            if (
+              confirmedRevisionRef.current === currentRevisionRef.current
+              && !pendingSaveRef.current
+            ) {
+              setSyncError(null);
+              syncErrorRef.current = null;
+              setShowSyncDetails(false);
+              setSyncState("online");
+              setStatus("Online Supabase");
+            } else {
+              setSyncState("syncing");
+              setStatus("Salvando online...");
+            }
           }
         } catch (error) {
           latestSaveSucceeded = false;
           const errorDetails = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
-          syncErrorRef.current = errorDetails;
-          setSyncError(errorDetails);
-          setSyncState("error");
-          setStatus("Erro de sincronização");
+          if (activeUserIdRef.current === request.userId) {
+            syncErrorRef.current = errorDetails;
+            setSyncError(errorDetails);
+            setSyncState("error");
+            setStatus("Erro de sincronização");
+          }
         } finally {
           inFlightRevisionRef.current = null;
         }
@@ -178,55 +194,137 @@ export function App() {
     return drainPromise;
   }, []);
 
+  const applyBootState = useCallback((
+    remoteUserId: string,
+    remoteEmail: string | null,
+    nextState: FinanceState,
+    currentRevision: number,
+    confirmedRevision: number,
+  ) => {
+    activeUserIdRef.current = remoteUserId;
+    currentRevisionRef.current = Math.max(currentRevision, confirmedRevision);
+    confirmedRevisionRef.current = confirmedRevision;
+    bootStateRef.current = nextState;
+    setState(nextState);
+    setUserId(remoteUserId);
+    setEmail(remoteEmail);
+    setRemoteReady(true);
+  }, []);
+
+  const retryRemoteLoad = useCallback(async (remoteUserId: string) => {
+    if (activeUserIdRef.current !== remoteUserId) return false;
+    setSyncState("syncing");
+    setStatus("Carregando dados online...");
+    try {
+      const remote = await loadRemoteState(remoteUserId);
+      if (activeUserIdRef.current !== remoteUserId) return false;
+      const revision = Math.max(currentRevisionRef.current, confirmedRevisionRef.current, 1);
+      saveUserLocalConfirmed(remoteUserId, remote, revision);
+      currentRevisionRef.current = revision;
+      confirmedRevisionRef.current = revision;
+      bootStateRef.current = remote;
+      remoteLoadPendingRef.current = false;
+      setState(remote);
+      setSyncError(null);
+      syncErrorRef.current = null;
+      setSyncState("online");
+      setStatus("Online Supabase");
+      return true;
+    } catch (error) {
+      if (activeUserIdRef.current !== remoteUserId) return false;
+      const errorDetails = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+      remoteLoadPendingRef.current = true;
+      syncErrorRef.current = errorDetails;
+      setSyncError(errorDetails);
+      setSyncState("error");
+      setStatus("Erro de sincronização");
+      return false;
+    }
+  }, []);
+
   useEffect(() => {
+    async function initializeAuthenticatedSession(session: { user: { id: string; email?: string } }) {
+      const remoteUserId = session.user.id;
+      const remoteEmail = session.user.email || null;
+      activeUserIdRef.current = remoteUserId;
+      setRemoteReady(false);
+      setStatus("Carregando dados online...");
+      setLastSavedAt(null);
+      setSaveError(null);
+
+      const local = loadUserLocalState(remoteUserId);
+      const metadata = loadUserSyncMetadata(remoteUserId);
+      const confirmedRevision = metadata?.confirmedRevision || 0;
+      const localRevision = Math.max(metadata?.localRevision || 0, confirmedRevision);
+
+      void loadProfile(remoteUserId).then((profile) => {
+        if (activeUserIdRef.current === remoteUserId) {
+          setDisplayName(profile.displayName);
+          setDisplayNameDraft(profile.displayName);
+        }
+      }).catch(() => {
+        // Profile failure must not replace or discard the financial backup.
+      });
+
+      if (local && metadata?.dirty) {
+        const dirtyRevision = Math.max(localRevision, confirmedRevision + 1, 1);
+        saveUserLocalDirty(remoteUserId, local, dirtyRevision, confirmedRevision);
+        remoteLoadPendingRef.current = false;
+        applyBootState(remoteUserId, remoteEmail, local, dirtyRevision, confirmedRevision);
+        setSyncState("syncing");
+        setStatus("Sincronizando alterações pendentes...");
+        void runRemoteSave(remoteUserId, local, dirtyRevision);
+        return;
+      }
+
+      try {
+        const remote = await loadRemoteState(remoteUserId);
+        if (activeUserIdRef.current !== remoteUserId) return;
+        const revision = Math.max(localRevision, confirmedRevision, 1);
+        if (!migrateLegacyLocalStateForUser(remoteUserId, remote, revision)) {
+          saveUserLocalConfirmed(remoteUserId, remote, revision);
+        }
+        remoteLoadPendingRef.current = false;
+        applyBootState(remoteUserId, remoteEmail, remote, revision, revision);
+        setSyncError(null);
+        syncErrorRef.current = null;
+        setSyncState("online");
+        setStatus("Online Supabase");
+      } catch (error) {
+        if (activeUserIdRef.current !== remoteUserId) return;
+        const fallback = local || emptyState();
+        const revision = Math.max(localRevision, confirmedRevision, 1);
+        if (!local) saveUserLocalConfirmed(remoteUserId, fallback, revision);
+        applyBootState(remoteUserId, remoteEmail, fallback, revision, revision);
+        const errorDetails = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+        remoteLoadPendingRef.current = true;
+        syncErrorRef.current = errorDetails;
+        setSyncError(errorDetails);
+        setSyncState("error");
+        setStatus("Erro de sincronização");
+      }
+    }
+
     async function boot() {
       if (!supabase) return;
       const { data } = await supabase.auth.getSession();
       const session = data.session;
       if (session?.user?.id) {
-        setRemoteReady(false);
-        setStatus("Carregando dados online...");
-        const remote = await loadRemoteState(session.user.id);
-        setLastSavedAt(null);
+        await initializeAuthenticatedSession(session);
+      } else {
+        clearAuthenticatedSession();
         setSaveError(null);
-        const profile = await loadProfile(session.user.id);
-        setDisplayName(profile.displayName);
-        setDisplayNameDraft(profile.displayName);
-        setSaveError(null);
-        setStatus("Online Supabase");
-        setSyncState("online");
-        setState(remote);
-        setUserId(session.user.id);
-        setEmail(session.user.email || null);
-        setRemoteReady(true);
+        setStatus("Aguardando login");
+      }
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user?.id) {
+          void initializeAuthenticatedSession(session);
         } else {
           clearAuthenticatedSession();
           setSaveError(null);
           setStatus("Aguardando login");
+          setSyncState("local-only");
         }
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-        if (session?.user?.id) {
-          setRemoteReady(false);
-          setStatus("Carregando dados online...");
-          const remote = await loadRemoteState(session.user.id);
-          setLastSavedAt(null);
-          setSaveError(null);
-          const profile = await loadProfile(session.user.id);
-          setDisplayName(profile.displayName);
-          setDisplayNameDraft(profile.displayName);
-          setSaveError(null);
-          setStatus("Online Supabase");
-          setSyncState("online");
-          setState(remote);
-          setUserId(session.user.id);
-          setEmail(session.user.email || null);
-          setRemoteReady(true);
-          } else {
-            clearAuthenticatedSession();
-            setSaveError(null);
-            setStatus("Aguardando login");
-            setSyncState("local-only");
-          }
       });
 
       return subscription;
@@ -235,15 +333,24 @@ export function App() {
     void boot().then((result) => { subscription = result; });
 
     return () => subscription?.unsubscribe();
-  }, []);
+  }, [applyBootState, runRemoteSave]);
 
   useEffect(() => {
-    saveLocalState(state);
+    if (!supabase) {
+      saveLocalState(state);
+      return;
+    }
 
-    if (!supabase || !userId || !remoteReady) return;
+    if (!userId || !remoteReady) return;
+
+    if (bootStateRef.current) {
+      if (bootStateRef.current === state) bootStateRef.current = null;
+      return;
+    }
 
     currentRevisionRef.current += 1;
     const revision = currentRevisionRef.current;
+    saveUserLocalDirty(userId, state, revision, confirmedRevisionRef.current);
     setSyncState(syncErrorRef.current ? "error" : "syncing");
 
     if (saveTimer.current) {
@@ -293,18 +400,17 @@ export function App() {
 
   useEffect(() => {
     const retryWhenOnline = () => {
-      if (
-        userId
-        && remoteReady
-        && confirmedRevisionRef.current !== currentRevisionRef.current
-      ) {
+      if (!userId || !remoteReady) return;
+      if (remoteLoadPendingRef.current) {
+        void retryRemoteLoad(userId);
+      } else if (confirmedRevisionRef.current !== currentRevisionRef.current) {
         void runRemoteSave(userId, state, currentRevisionRef.current);
       }
     };
 
     window.addEventListener("online", retryWhenOnline);
     return () => window.removeEventListener("online", retryWhenOnline);
-  }, [remoteReady, runRemoteSave, state, userId]);
+  }, [remoteReady, retryRemoteLoad, runRemoteSave, state, userId]);
 
   const updateState = useCallback(
     (updater: (prev: FinanceState) => FinanceState) =>
@@ -551,7 +657,8 @@ export function App() {
   const SyncIcon = syncState === "error" ? AlertCircle : syncState === "syncing" ? LoaderCircle : CheckCircle2;
   const retrySync = () => {
     if (userId && remoteReady) {
-      void runRemoteSave(userId, state, currentRevisionRef.current);
+      if (remoteLoadPendingRef.current) void retryRemoteLoad(userId);
+      else void runRemoteSave(userId, state, currentRevisionRef.current);
     }
   };
     if (isSupabaseConfigured && !userId) {
