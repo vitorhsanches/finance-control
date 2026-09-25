@@ -304,3 +304,11 @@ Changed files:
 -  M src/index.css
 -  M src/pages/InstallmentsPage.tsx
 - ?? src/pages/InstallmentsPage.test.tsx
+
+## 2026-09-25 11:40
+- fix: repair npm lockfile consistency
+
+Changed files:
+-  M package-lock.json
+- ?? fix-lockfile.ps1
+- ?? npm-ci-diagnostic.txt
