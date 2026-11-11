@@ -37,8 +37,8 @@ export default defineConfig({
       url: "http://127.0.0.1:4273",
       reuseExistingServer: false,
       env: {
-        VITE_SUPABASE_URL: "https://SEU-PROJETO.supabase.co",
-        VITE_SUPABASE_ANON_KEY: "e2e-disabled-key",
+        VITE_SUPABASE_URL: "",
+        VITE_SUPABASE_ANON_KEY: "",
       },
     },
     {
