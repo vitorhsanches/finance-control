@@ -13,7 +13,13 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/main.tsx', 'src/vite-env.d.ts']
+      exclude: ['src/main.tsx', 'src/vite-env.d.ts'],
+      thresholds: {
+        statements: 70,
+        branches: 60,
+        functions: 65,
+        lines: 75
+      }
     }
   }
 });
