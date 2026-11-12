@@ -17,9 +17,7 @@ jobs:
           node-version: '24.22.1'
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+      - run: npm run validate
       - run: npm run test:coverage
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e

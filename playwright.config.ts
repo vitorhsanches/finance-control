@@ -22,13 +22,18 @@ export default defineConfig({
     },
     {
       name: "chromium-remote",
-      testMatch: /remote\.spec\.ts/,
+      testMatch: /[\\/]remote\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:4274" },
     },
     {
       name: "mobile-chromium",
       testMatch: /mobile\.spec\.ts/,
       use: { ...devices["Pixel 7"], baseURL: "http://127.0.0.1:4273" },
+    },
+    {
+      name: "mobile-remote",
+      testMatch: /mobile-remote\.spec\.ts/,
+      use: { ...devices["Pixel 7"], baseURL: "http://127.0.0.1:4274" },
     },
   ],
   webServer: [
