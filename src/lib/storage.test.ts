@@ -5,6 +5,7 @@ import type * as StorageModule from './storage';
 
 const mock = createSupabaseMock();
 let storage: typeof StorageModule;
+let authenticatedUserId = 'user-1';
 
 beforeAll(async () => {
   vi.doMock('./supabaseClient', () => ({
@@ -17,6 +18,8 @@ beforeAll(async () => {
 beforeEach(() => {
   mock.reset();
   localStorage.clear();
+  authenticatedUserId = 'user-1';
+  mock.auth.getSession = (async () => ({ data: { session: { user: { id: authenticatedUserId } } } })) as unknown as typeof mock.auth.getSession;
 });
 
 describe('local storage', () => {
@@ -174,6 +177,7 @@ describe('remote storage', () => {
     mock.setResolver(() => ({ data: [], error: null, count: 0 }));
 
     await storage.saveRemoteState('user-1', state);
+    authenticatedUserId = 'user-2';
     await storage.saveRemoteState('user-2', state);
     const upserts = mock.calls.filter((item) => item.table === 'future_bills' && item.operation === 'upsert');
     expect(upserts).toHaveLength(2);

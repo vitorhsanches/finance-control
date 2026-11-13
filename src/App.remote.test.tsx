@@ -8,6 +8,10 @@ const mocks = vi.hoisted(() => ({
   saveLocalState: vi.fn(),
   loadUserLocalState: vi.fn(),
   loadUserSyncMetadata: vi.fn(),
+  loadPendingDeletes: vi.fn(),
+  recordPendingDelete: vi.fn(),
+  recordPendingSeriesDelete: vi.fn(),
+  cleanupConfirmedSyncMetadataOnLogout: vi.fn(),
   saveUserLocalDirty: vi.fn(),
   saveUserLocalConfirmed: vi.fn(),
   migrateLegacyLocalStateForUser: vi.fn(),
@@ -29,6 +33,10 @@ vi.mock('./lib/storage', () => ({
   saveLocalState: mocks.saveLocalState,
   loadUserLocalState: mocks.loadUserLocalState,
   loadUserSyncMetadata: mocks.loadUserSyncMetadata,
+  loadPendingDeletes: mocks.loadPendingDeletes,
+  recordPendingDelete: mocks.recordPendingDelete,
+  recordPendingSeriesDelete: mocks.recordPendingSeriesDelete,
+  cleanupConfirmedSyncMetadataOnLogout: mocks.cleanupConfirmedSyncMetadataOnLogout,
   saveUserLocalDirty: mocks.saveUserLocalDirty,
   saveUserLocalConfirmed: mocks.saveUserLocalConfirmed,
   migrateLegacyLocalStateForUser: mocks.migrateLegacyLocalStateForUser,
@@ -90,6 +98,7 @@ beforeEach(() => {
   mocks.saveRemoteState.mockResolvedValue(undefined);
   mocks.loadUserLocalState.mockReturnValue(null);
   mocks.loadUserSyncMetadata.mockReturnValue(null);
+  mocks.loadPendingDeletes.mockReturnValue([]);
   mocks.saveUserLocalDirty.mockImplementation(() => undefined);
   mocks.saveUserLocalConfirmed.mockImplementation(() => undefined);
   mocks.migrateLegacyLocalStateForUser.mockReturnValue(false);

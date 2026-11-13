@@ -9,7 +9,8 @@ export function BudgetsPage({
   state,
   updateState,
   month,
-}: PageProps & { month: string }) {
+  onDeleteItem,
+}: PageProps & { month: string; onDeleteItem?: (id: string) => void }) {
   const rows = budgetRows(state, month);
   const add = () =>
     updateState((prev) => ({
@@ -29,11 +30,9 @@ export function BudgetsPage({
       ...prev,
       budgets: prev.budgets.map((b) => (b.id === id ? { ...b, ...patch } : b)),
     }));
-  const remove = (id: string) =>
-    updateState((prev) => ({
-      ...prev,
-      budgets: prev.budgets.filter((b) => b.id !== id),
-    }));
+  const remove = (id: string) => onDeleteItem
+    ? onDeleteItem(id)
+    : updateState((prev) => ({ ...prev, budgets: prev.budgets.filter((b) => b.id !== id) }));
   return (
     <Panel
       title="Metas e orçamento"

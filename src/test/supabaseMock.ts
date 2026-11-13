@@ -42,6 +42,16 @@ class QueryBuilder implements PromiseLike<SupabaseResult> {
     return this;
   }
 
+  not(column: string, operator: string, value: unknown) {
+    this.filters.push([`${column}.not.${operator}`, value]);
+    return this;
+  }
+
+  in(column: string, values: unknown[]) {
+    this.filters.push([`${column}.in`, values]);
+    return this;
+  }
+
   order(column: string, options?: unknown) {
     this.options = { column, ...((options || {}) as object) };
     return this;

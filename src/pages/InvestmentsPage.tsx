@@ -5,7 +5,7 @@ import { money, uid } from "../lib/utils";
 import { MetricCard, MoneyInput, Panel } from "../components/ui";
 import type { PageProps } from "./types";
 
-export function InvestmentsPage({ state, updateState }: PageProps) {
+export function InvestmentsPage({ state, updateState, onDeleteItem }: PageProps & { onDeleteItem?: (id: string) => void }) {
   const getCurrentAmount = (investment: Investment) => {
     if (investment.initialAmount > 0 && investment.currentAmount === 0) {
       return investment.initialAmount;
@@ -223,11 +223,9 @@ export function InvestmentsPage({ state, updateState }: PageProps) {
       ),
     }));
 
-  const remove = (id: string) =>
-    updateState((prev) => ({
-      ...prev,
-      investments: prev.investments.filter((i) => i.id !== id),
-    }));
+  const remove = (id: string) => onDeleteItem
+    ? onDeleteItem(id)
+    : updateState((prev) => ({ ...prev, investments: prev.investments.filter((i) => i.id !== id) }));
 
   return (
     <div className="page-stack">
