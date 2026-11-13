@@ -17,7 +17,8 @@ class SessionOwnerError extends Error {}
 const financialTables = ['transactions', 'installments', 'future_bills', 'investments', 'budgets'] as const;
 export type FinancialTable = typeof financialTables[number];
 type PendingIdDelete = { table: FinancialTable; id: string };
-type PendingSeriesDelete = { table: 'future_bills'; userId: string; seriesId: string; fromOccurrence: number };
+type PendingSeriesDelete = { table: 'future_bills'; userId: string; seriesId: string; fromOccurrence: number;
+  deletedIds?: string[]; protectedIds?: string[] };
 type PendingDelete = PendingIdDelete | PendingSeriesDelete;
 const confirmedDeletes = new Map<string, Set<string>>();
 let deleteSessionToken: string | null = null;
@@ -45,14 +46,36 @@ export class CorruptDeletionJournalError extends Error {
   }
 }
 
-export function recoverCorruptDeletionJournal(userId: string): void {
+function unusedBackupKey(prefix: string): string {
+  const base = `${prefix}:${Date.now()}`;
+  let key = base;
+  for (let suffix = 1; localStorage.getItem(key) !== null; suffix += 1) key = `${base}:${suffix}`;
+  return key;
+}
+
+function preserveCorruptJournal(userId: string, raw: string): void {
+  const base = corruptPendingKey(userId);
+  // Keep the original compatibility key, and archive later, distinct corruptions.
+  if (localStorage.getItem(base) === null) { localStorage.setItem(base, raw); return; }
+  for (const key of Object.keys(localStorage)) {
+    if ((key === base || key.startsWith(`${base}:`)) && localStorage.getItem(key) === raw) return;
+  }
+  localStorage.setItem(unusedBackupKey(base), raw);
+}
+
+export function recoverCorruptDeletionJournal(userId: string, state?: FinanceState): void {
   try { loadPendingDeletes(userId); }
   catch (error) {
     if (!(error instanceof CorruptDeletionJournalError)) throw error;
     const raw = localStorage.getItem(pendingKey(userId));
     if (raw === null) return;
-    // Only release the journal after its exact contents are safely preserved.
-    localStorage.setItem(corruptPendingKey(userId), raw);
+    // The live state may contain the edit that failed to reach the cache.
+    localStorage.setItem(unusedBackupKey(`${pendingKey(userId)}:pre-recovery`), JSON.stringify({
+      userId, createdAt: new Date().toISOString(),
+      cache: localStorage.getItem(getUserLocalStateKey(userId)),
+      metadata: localStorage.getItem(getUserSyncMetadataKey(userId)), journal: raw, state,
+    }));
+    preserveCorruptJournal(userId, raw);
     localStorage.removeItem(pendingKey(userId));
   }
 }
@@ -67,11 +90,13 @@ export function loadPendingDeletes(userId: string): PendingDelete[] {
       if ('id' in entry) return typeof entry.id === 'string' && entry.id.length > 0;
       return entry.table === 'future_bills' && entry.userId === userId
         && typeof entry.seriesId === 'string' && entry.seriesId.length > 0
-        && Number.isSafeInteger(entry.fromOccurrence) && entry.fromOccurrence >= 1;
+        && Number.isSafeInteger(entry.fromOccurrence) && entry.fromOccurrence >= 1
+        && [entry.deletedIds, entry.protectedIds].every((ids) => ids === undefined
+          || (Array.isArray(ids) && ids.every((id) => typeof id === 'string' && id.length > 0)));
     })) throw new Error('invalid journal');
     return value as PendingDelete[];
   } catch {
-    try { localStorage.setItem(corruptPendingKey(userId), raw); } catch { /* preserve the original key */ }
+    try { preserveCorruptJournal(userId, raw); } catch { /* preserve the original key */ }
     throw new CorruptDeletionJournalError();
   }
 }
@@ -84,13 +109,25 @@ export function recordPendingDelete(userId: string, table: FinancialTable, id: s
   localStorage.setItem(pendingKey(userId), JSON.stringify([...pending, { table, id }]));
 }
 
-export function recordPendingSeriesDelete(userId: string, seriesId: string, fromOccurrence: number): PendingSeriesDelete {
+export function recordPendingSeriesDelete(userId: string, seriesId: string, fromOccurrence: number, bills?: FutureBill[]): PendingSeriesDelete {
   ensureDeleteSession();
   const entry: PendingSeriesDelete = { table: 'future_bills', userId, seriesId, fromOccurrence };
   const pending = loadPendingDeletes(userId);
-  if (!pending.some((item) => samePendingDelete(item, entry))) {
-    localStorage.setItem(pendingKey(userId), JSON.stringify([...pending, entry]));
+  const existing = pending.find((item) => samePendingDelete(item, entry));
+  if (existing && 'seriesId' in existing) {
+    if (bills && existing.deletedIds) {
+      const deletedIds = new Set(existing.deletedIds);
+      for (const bill of bills) if (bill.seriesId === seriesId
+        && typeof bill.occurrenceNumber === 'number' && bill.occurrenceNumber >= fromOccurrence) deletedIds.add(bill.id);
+      existing.deletedIds = [...deletedIds];
+      if (existing.protectedIds) existing.protectedIds = existing.protectedIds.filter((id) => !deletedIds.has(id));
+      localStorage.setItem(pendingKey(userId), JSON.stringify(pending));
+    }
+    return existing;
   }
+  if (bills) entry.deletedIds = bills.filter((bill) => bill.seriesId === seriesId
+    && typeof bill.occurrenceNumber === 'number' && bill.occurrenceNumber >= fromOccurrence).map((bill) => bill.id);
+  localStorage.setItem(pendingKey(userId), JSON.stringify([...pending, entry]));
   return entry;
 }
 
@@ -120,6 +157,9 @@ function excludedIds(userId: string, table: FinancialTable): Set<string> {
   const ids = new Set(loadPendingDeletes(userId)
     .filter((entry): entry is PendingIdDelete => 'id' in entry && entry.table === table)
     .map((entry) => entry.id));
+  if (table === 'future_bills') {
+    for (const entry of excludedSeries(userId)) for (const id of entry.deletedIds || []) ids.add(id);
+  }
   for (const key of confirmedDeletes.get(userId) || []) {
     if (key.startsWith(`${table}:`)) ids.add(key.slice(table.length + 1));
   }
@@ -131,9 +171,27 @@ function excludedSeries(userId: string): PendingSeriesDelete[] {
   return loadPendingDeletes(userId).filter((entry): entry is PendingSeriesDelete => 'seriesId' in entry);
 }
 
-function seriesCovers(series: PendingSeriesDelete[], item: { seriesId?: string | null; occurrenceNumber?: number | null }) {
+function seriesCovers(series: PendingSeriesDelete[], item: { id?: string; seriesId?: string | null; occurrenceNumber?: number | null }) {
   return series.some((entry) => item.seriesId === entry.seriesId
-    && typeof item.occurrenceNumber === 'number' && item.occurrenceNumber >= entry.fromOccurrence);
+    && typeof item.occurrenceNumber === 'number' && item.occurrenceNumber >= entry.fromOccurrence
+    && (entry.deletedIds === undefined || (item.id !== undefined && entry.deletedIds.includes(item.id))));
+}
+
+function protectRecreatedOccurrences(userId: string, state: FinanceState): void {
+  const pending = loadPendingDeletes(userId);
+  let changed = false;
+  for (const entry of pending) {
+    if (!('seriesId' in entry) || !entry.deletedIds) continue;
+    const protectedIds = new Set(entry.protectedIds);
+    for (const bill of state.bills) {
+      if (bill.seriesId === entry.seriesId && typeof bill.occurrenceNumber === 'number'
+        && bill.occurrenceNumber >= entry.fromOccurrence && !entry.deletedIds.includes(bill.id)) {
+        if (!protectedIds.has(bill.id)) { protectedIds.add(bill.id); changed = true; }
+      }
+    }
+    if (protectedIds.size) entry.protectedIds = [...protectedIds];
+  }
+  if (changed) localStorage.setItem(pendingKey(userId), JSON.stringify(pending));
 }
 
 function withoutExcluded(userId: string, state: FinanceState): FinanceState {
@@ -283,6 +341,7 @@ export function saveUserLocalDirty(
     schemaVersion: LOCAL_SYNC_SCHEMA_VERSION,
   };
   localStorage.setItem(getUserSyncMetadataKey(userId), JSON.stringify(metadata));
+  protectRecreatedOccurrences(userId, state);
   localStorage.setItem(getUserLocalStateKey(userId), JSON.stringify(normalizeState(withoutExcluded(userId, state))));
   return metadata;
 }
@@ -513,6 +572,7 @@ const cardRules = (cardRulesRes.data || []).map((row): CardRule => ({
 }
 
 export function saveRemoteState(userId: string, state: FinanceState): Promise<void> {
+  protectRecreatedOccurrences(userId, state);
   const snapshot = withoutExcluded(userId, normalizeState(JSON.parse(JSON.stringify(state)) as FinanceState));
   ensureDeleteSession();
   const queuedSave = remoteSaveQueue.then(() => persistRemoteState(userId, snapshot));
@@ -552,14 +612,24 @@ export function deleteRemoteFutureBillsFrom(
   const entry = recordPendingSeriesDelete(normalizedUserId, normalizedSeriesId, normalizedOccurrenceNumber);
   const queuedDelete = remoteSaveQueue.then(async () => {
     await assertSessionOwner(client, normalizedUserId);
-    await executeRemoteRequest('future_bills', 'delete', client.from('future_bills').delete()
-      .eq('user_id', normalizedUserId).eq('series_id', normalizedSeriesId)
-      .gte('occurrence_number', normalizedOccurrenceNumber));
+    await executeSeriesDelete(client, normalizedUserId, entry);
     await assertSessionOwner(client, normalizedUserId);
     removePendingDelete(normalizedUserId, entry);
   });
   remoteSaveQueue = queuedDelete.catch(() => undefined);
   return queuedDelete;
+}
+
+function executeSeriesDelete(client: NonNullable<typeof supabase>, userId: string, entry: PendingSeriesDelete) {
+  const latest = loadPendingDeletes(userId).find((item) => samePendingDelete(item, entry));
+  const protectedIds = latest && 'seriesId' in latest ? latest.protectedIds || [] : [];
+  let query = client.from('future_bills').delete().eq('user_id', userId)
+    .eq('series_id', entry.seriesId).gte('occurrence_number', entry.fromOccurrence);
+  if (protectedIds.length) {
+    const filter = `(${protectedIds.map((id) => `"${id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',')})`;
+    query = query.not('id', 'in', filter);
+  }
+  return executeRemoteRequest('future_bills', 'delete', query);
 }
 
 function enqueuePendingDeletes(userId: string): Promise<void> {
@@ -594,9 +664,7 @@ async function flushPendingDeletes(userId: string): Promise<void> {
         await executeRemoteRequest(entry.table, 'delete', client.from(entry.table).delete()
           .eq('user_id', userId).eq('id', entry.id));
       } else {
-        await executeRemoteRequest('future_bills', 'delete', client.from('future_bills').delete()
-          .eq('user_id', userId).eq('series_id', entry.seriesId)
-          .gte('occurrence_number', entry.fromOccurrence));
+        await executeSeriesDelete(client, userId, entry);
       }
       await assertSessionOwner(client, userId);
       removePendingDelete(userId, entry);
@@ -680,7 +748,7 @@ async function persistRemoteState(userId: string, state: FinanceState) {
           ? data as unknown as Array<{ id: string; series_id?: string; occurrence_number?: number }>
           : [];
         uncoveredCount = rows.length < totalCount ? 1 : rows.filter((row) => !covered.has(row.id)
-          && !seriesCovers(series, { seriesId: row.series_id, occurrenceNumber: row.occurrence_number })).length;
+          && !seriesCovers(series, { id: row.id, seriesId: row.series_id, occurrenceNumber: row.occurrence_number })).length;
       } else {
         const ids = [...covered];
         const idFilter = `(${ids.map((id) => `"${id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',')})`;
@@ -704,7 +772,7 @@ async function persistRemoteState(userId: string, state: FinanceState) {
 
         if (series.length) {
           const starts = new Map<string, number>();
-          for (const entry of series) starts.set(entry.seriesId,
+          for (const entry of series.filter((item) => item.deletedIds === undefined)) starts.set(entry.seriesId,
             Math.min(starts.get(entry.seriesId) ?? entry.fromOccurrence, entry.fromOccurrence));
           for (const [seriesId, fromOccurrence] of starts) {
             let seriesQuery = supabase.from('future_bills').select('id', { count: 'exact', head: true })

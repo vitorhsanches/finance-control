@@ -616,7 +616,7 @@ export function App() {
 
     try {
       if (supabase && userId) {
-        recordPendingSeriesDelete(userId, seriesId.trim(), occurrenceNumber);
+        recordPendingSeriesDelete(userId, seriesId.trim(), occurrenceNumber, state.bills);
         // This slot may predate the delete and outlive its confirmation.
         const pending = pendingSaveRef.current;
         if (pending?.userId === userId) {
@@ -662,7 +662,7 @@ export function App() {
         throw error;
       }
     }
-  }, [remoteReady, updateState, userId]);
+  }, [remoteReady, state.bills, updateState, userId]);
 
   const setSelectedMonth = useCallback((month: string) => {
     updateState((prev) => ({
@@ -811,18 +811,19 @@ export function App() {
   if (journalBlocked) {
     return <main className="app-shell"><section role="alert" title="Erro de sincronização">
       <h1>Diário de exclusões corrompido</h1>
-      <p>A sincronização está bloqueada. Recupere o diário para carregar os dados online. O conteúdo corrompido será preservado em :corrupt; exclusões não confirmadas precisarão ser revisadas.</p>
+      <p>A sincronização está bloqueada. A recuperação adota os dados online. As edições locais não sincronizadas, o cache e o diário serão preservados em um backup antes da recuperação; exclusões não confirmadas precisarão ser revisadas.</p>
       {syncError && <p>{syncError.message}</p>}
       <button type="button" onClick={async () => {
         if (!userId) return;
         try {
-          recoverCorruptDeletionJournal(userId);
+          recoverCorruptDeletionJournal(userId, state);
           pendingSaveRef.current = null;
           if (await retryRemoteLoad(userId)) setJournalBlocked(false);
         } catch (error) {
           setSyncError(getRemoteErrorDetails(error));
         }
       }}>Preservar diário e recuperar dados online</button>
+      <button type="button" onClick={exportBackup}>Exportar backup</button>
     </section></main>;
   }
       
