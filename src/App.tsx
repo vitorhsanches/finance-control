@@ -8,7 +8,7 @@ import { emptyState, normalizeState } from "./data/sample";
 import {
   isSupabaseConfigured, loadLocalState, loadProfile, loadRemoteState, loadUserLocalState, loadUserSyncMetadata,
   cleanupConfirmedSyncMetadataOnLogout, recoverCorruptDeletionJournal, deleteRemoteFutureBill, deleteRemoteFutureBillsFrom,
-  deleteRemoteTransaction, getRemoteErrorDetails,
+  deleteRemoteTransaction, getRemoteErrorDetails, getUserLocalStateKey,
   loadPendingDeletes, migrateLegacyLocalStateForUser, recordPendingDelete, recordPendingSeriesDelete,
   saveLocalState, saveProfile, saveRemoteState,
   saveUserLocalConfirmed, saveUserLocalDirty, supabase,
@@ -75,6 +75,11 @@ function isCorruptDeletionJournal(error: unknown) {
 
 function hasPendingDeletes(userId: string) {
   return loadPendingDeletes(userId).length > 0;
+}
+
+function readBackupCache(userId: string | null): string | null {
+  try { return userId ? localStorage.getItem(getUserLocalStateKey(userId)) : null; }
+  catch { return null; }
 }
 
 type PendingRemoteSave = {
@@ -672,7 +677,9 @@ export function App() {
   }, [updateState]);
 
   const exportBackup = () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], {
+    const content = journalBlocked ? readBackupCache(userId) : JSON.stringify(state, null, 2);
+    if (!content) return;
+    const blob = new Blob([content], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -809,6 +816,7 @@ export function App() {
       return <AuthScreen />;
     }
   if (journalBlocked) {
+    const hasCache = Boolean(readBackupCache(userId));
     return <main className="app-shell"><section role="alert" title="Erro de sincronização">
       <h1>Diário de exclusões corrompido</h1>
       <p>A sincronização está bloqueada. A recuperação adota os dados online. As edições locais não sincronizadas, o cache e o diário serão preservados em um backup antes da recuperação; exclusões não confirmadas precisarão ser revisadas.</p>
@@ -823,7 +831,8 @@ export function App() {
           setSyncError(getRemoteErrorDetails(error));
         }
       }}>Preservar diário e recuperar dados online</button>
-      <button type="button" onClick={exportBackup}>Exportar backup</button>
+      <button type="button" disabled={!hasCache} onClick={exportBackup}>Exportar backup</button>
+      {!hasCache && <p>Não há cache local disponível para exportar. Nenhum arquivo será gerado.</p>}
     </section></main>;
   }
       

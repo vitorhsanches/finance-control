@@ -169,4 +169,3 @@ it('B: preserves two recovery backups and two corrupt journals even with identic
     expect(preserved.map((k) => localStorage.getItem(k)).sort()).toEqual(['{first', '{second']);
   } finally { vi.restoreAllMocks(); }
 });
-
