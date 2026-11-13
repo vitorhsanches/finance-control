@@ -9,8 +9,144 @@ export const LOCAL_STORAGE_KEY = 'finance-control-react-v3';
 const LEGACY_LOCAL_STORAGE_KEY = 'finance-control-react-v1';
 const USER_LOCAL_STORAGE_PREFIX = 'finance-control-react-v3:user:';
 const USER_SYNC_METADATA_PREFIX = 'finance-control-sync-v1:user:';
+const USER_PENDING_DELETES_PREFIX = 'finance-control-pending-deletes-v1:user:';
+const DELETE_SESSION_KEY = 'finance-control-delete-session-v1';
 export const LOCAL_SYNC_SCHEMA_VERSION = 1;
 let remoteSaveQueue: Promise<void> = Promise.resolve();
+class SessionOwnerError extends Error {}
+const financialTables = ['transactions', 'installments', 'future_bills', 'investments', 'budgets'] as const;
+export type FinancialTable = typeof financialTables[number];
+type PendingIdDelete = { table: FinancialTable; id: string };
+type PendingSeriesDelete = { table: 'future_bills'; userId: string; seriesId: string; fromOccurrence: number };
+type PendingDelete = PendingIdDelete | PendingSeriesDelete;
+const confirmedDeletes = new Map<string, Set<string>>();
+let deleteSessionToken: string | null = null;
+
+function ensureDeleteSession() {
+  let token = localStorage.getItem(DELETE_SESSION_KEY);
+  if (!token) {
+    token = `${Date.now()}:${Math.random()}`;
+    localStorage.setItem(DELETE_SESSION_KEY, token);
+  }
+  if (deleteSessionToken !== token) {
+    confirmedDeletes.clear();
+    deleteSessionToken = token;
+  }
+}
+
+function deletionKey(table: FinancialTable, id: string) { return `${table}:${id}`; }
+function pendingKey(userId: string) { return `${USER_PENDING_DELETES_PREFIX}${userStorageSuffix(userId)}`; }
+function corruptPendingKey(userId: string) { return `${pendingKey(userId)}:corrupt`; }
+
+export class CorruptDeletionJournalError extends Error {
+  constructor() {
+    super('Diário de exclusões pendentes corrompido; sincronização bloqueada.');
+    this.name = 'CorruptDeletionJournalError';
+  }
+}
+
+export function recoverCorruptDeletionJournal(userId: string): void {
+  try { loadPendingDeletes(userId); }
+  catch (error) {
+    if (!(error instanceof CorruptDeletionJournalError)) throw error;
+    const raw = localStorage.getItem(pendingKey(userId));
+    if (raw === null) return;
+    // Only release the journal after its exact contents are safely preserved.
+    localStorage.setItem(corruptPendingKey(userId), raw);
+    localStorage.removeItem(pendingKey(userId));
+  }
+}
+
+export function loadPendingDeletes(userId: string): PendingDelete[] {
+  const raw = localStorage.getItem(pendingKey(userId));
+  if (raw === null) return [];
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!Array.isArray(value) || !value.every((entry) => {
+      if (typeof entry !== 'object' || entry === null || !financialTables.includes(entry.table)) return false;
+      if ('id' in entry) return typeof entry.id === 'string' && entry.id.length > 0;
+      return entry.table === 'future_bills' && entry.userId === userId
+        && typeof entry.seriesId === 'string' && entry.seriesId.length > 0
+        && Number.isSafeInteger(entry.fromOccurrence) && entry.fromOccurrence >= 1;
+    })) throw new Error('invalid journal');
+    return value as PendingDelete[];
+  } catch {
+    try { localStorage.setItem(corruptPendingKey(userId), raw); } catch { /* preserve the original key */ }
+    throw new CorruptDeletionJournalError();
+  }
+}
+
+export function recordPendingDelete(userId: string, table: FinancialTable, id: string): void {
+  ensureDeleteSession();
+  if (!userId.trim() || !id.trim()) throw new Error('Identidade inválida para exclusão.');
+  const pending = loadPendingDeletes(userId);
+  if (pending.some((entry) => 'id' in entry && entry.table === table && entry.id === id)) return;
+  localStorage.setItem(pendingKey(userId), JSON.stringify([...pending, { table, id }]));
+}
+
+export function recordPendingSeriesDelete(userId: string, seriesId: string, fromOccurrence: number): PendingSeriesDelete {
+  ensureDeleteSession();
+  const entry: PendingSeriesDelete = { table: 'future_bills', userId, seriesId, fromOccurrence };
+  const pending = loadPendingDeletes(userId);
+  if (!pending.some((item) => samePendingDelete(item, entry))) {
+    localStorage.setItem(pendingKey(userId), JSON.stringify([...pending, entry]));
+  }
+  return entry;
+}
+
+function samePendingDelete(left: PendingDelete, right: PendingDelete) {
+  if ('id' in left && 'id' in right) return left.table === right.table && left.id === right.id;
+  if ('seriesId' in left && 'seriesId' in right) {
+    return left.userId === right.userId && left.seriesId === right.seriesId
+      && left.fromOccurrence === right.fromOccurrence;
+  }
+  return false;
+}
+
+function removePendingDelete(userId: string, entry: PendingDelete) {
+  ensureDeleteSession();
+  const remaining = loadPendingDeletes(userId).filter((item) => !samePendingDelete(item, entry));
+  if (remaining.length) localStorage.setItem(pendingKey(userId), JSON.stringify(remaining));
+  else localStorage.removeItem(pendingKey(userId));
+  if ('id' in entry) {
+    const deleted = confirmedDeletes.get(userId) || new Set<string>();
+    deleted.add(deletionKey(entry.table, entry.id));
+    confirmedDeletes.set(userId, deleted);
+  }
+}
+
+function excludedIds(userId: string, table: FinancialTable): Set<string> {
+  ensureDeleteSession();
+  const ids = new Set(loadPendingDeletes(userId)
+    .filter((entry): entry is PendingIdDelete => 'id' in entry && entry.table === table)
+    .map((entry) => entry.id));
+  for (const key of confirmedDeletes.get(userId) || []) {
+    if (key.startsWith(`${table}:`)) ids.add(key.slice(table.length + 1));
+  }
+  return ids;
+}
+
+function excludedSeries(userId: string): PendingSeriesDelete[] {
+  ensureDeleteSession();
+  return loadPendingDeletes(userId).filter((entry): entry is PendingSeriesDelete => 'seriesId' in entry);
+}
+
+function seriesCovers(series: PendingSeriesDelete[], item: { seriesId?: string | null; occurrenceNumber?: number | null }) {
+  return series.some((entry) => item.seriesId === entry.seriesId
+    && typeof item.occurrenceNumber === 'number' && item.occurrenceNumber >= entry.fromOccurrence);
+}
+
+function withoutExcluded(userId: string, state: FinanceState): FinanceState {
+  const excluded = Object.fromEntries(financialTables.map((table) => [table, excludedIds(userId, table)])) as Record<FinancialTable, Set<string>>;
+  const series = excludedSeries(userId);
+  return { ...state,
+    transactions: state.transactions.filter((item) => !excluded.transactions.has(item.id)),
+    installments: state.installments.filter((item) => !excluded.installments.has(item.id)),
+    bills: state.bills.filter((item) => !excluded.future_bills.has(item.id) && !seriesCovers(series, item)),
+    investments: state.investments.filter((item) => !excluded.investments.has(item.id)),
+    budgets: state.budgets.filter((item) => !excluded.budgets.has(item.id)),
+  };
+}
 
 export type LocalSyncMetadata = {
   userId: string;
@@ -48,6 +184,9 @@ export class RemoteSaveError extends Error {
 export function getRemoteErrorDetails(error: unknown): RemoteErrorDetails {
   if (error instanceof RemoteSaveError) return error.details;
   if (error instanceof Error) return { message: error.message };
+  if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') {
+    return { message: error.message };
+  }
   return { message: 'Erro remoto desconhecido.' };
 }
 export function loadLocalState(): FinanceState {
@@ -77,11 +216,13 @@ export function getUserSyncMetadataKey(userId: string) {
 }
 
 export function loadUserLocalState(userId: string): FinanceState | null {
+  loadPendingDeletes(userId);
   const raw = localStorage.getItem(getUserLocalStateKey(userId));
   if (!raw) return null;
   try {
-    return normalizeState(JSON.parse(raw));
-  } catch {
+    return withoutExcluded(userId, normalizeState(JSON.parse(raw)));
+  } catch (error) {
+    if (error instanceof CorruptDeletionJournalError) throw error;
     return null;
   }
 }
@@ -115,6 +256,16 @@ export function loadUserSyncMetadata(userId: string): LocalSyncMetadata | null {
   }
 }
 
+export function cleanupConfirmedSyncMetadataOnLogout(userId: string): void {
+  // Keep dirty recovery metadata, pending deletes, and corrupt journals for the next login.
+  try {
+    if (loadPendingDeletes(userId).length || loadUserSyncMetadata(userId)?.dirty) return;
+  } catch {
+    return;
+  }
+  localStorage.removeItem(getUserSyncMetadataKey(userId));
+}
+
 export function saveUserLocalDirty(
   userId: string,
   state: FinanceState,
@@ -132,7 +283,7 @@ export function saveUserLocalDirty(
     schemaVersion: LOCAL_SYNC_SCHEMA_VERSION,
   };
   localStorage.setItem(getUserSyncMetadataKey(userId), JSON.stringify(metadata));
-  localStorage.setItem(getUserLocalStateKey(userId), JSON.stringify(normalizeState(state)));
+  localStorage.setItem(getUserLocalStateKey(userId), JSON.stringify(normalizeState(withoutExcluded(userId, state))));
   return metadata;
 }
 
@@ -156,7 +307,7 @@ export function saveUserLocalConfirmed(
     return metadata;
   }
 
-  localStorage.setItem(getUserLocalStateKey(userId), JSON.stringify(normalizeState(state)));
+  localStorage.setItem(getUserLocalStateKey(userId), JSON.stringify(normalizeState(withoutExcluded(userId, state))));
   const metadata: LocalSyncMetadata = {
     userId,
     localRevision: normalizedRevision,
@@ -227,6 +378,8 @@ export async function saveProfile(userId: string, displayName: string) {
 
 export async function loadRemoteState(userId: string): Promise<FinanceState> {
   if (!supabase) return loadLocalState();
+
+  await enqueuePendingDeletes(userId);
 
   const { data: settingsRow, error: settingsError } = await supabase
     .from('app_settings')
@@ -356,11 +509,12 @@ const cardRules = (cardRulesRes.data || []).map((row): CardRule => ({
     budgets: (budgetsRes.data || []).map(rowToBudget)
   };
 
-  return withDefaultCatalogs(remoteState);
+  return withDefaultCatalogs(withoutExcluded(userId, remoteState));
 }
 
 export function saveRemoteState(userId: string, state: FinanceState): Promise<void> {
-  const snapshot = normalizeState(JSON.parse(JSON.stringify(state)) as FinanceState);
+  const snapshot = withoutExcluded(userId, normalizeState(JSON.parse(JSON.stringify(state)) as FinanceState));
+  ensureDeleteSession();
   const queuedSave = remoteSaveQueue.then(() => persistRemoteState(userId, snapshot));
 
   remoteSaveQueue = queuedSave.catch(() => undefined);
@@ -370,40 +524,14 @@ export function saveRemoteState(userId: string, state: FinanceState): Promise<vo
 
 export function deleteRemoteTransaction(userId: string, transactionId: string): Promise<void> {
   if (!supabase) return Promise.resolve();
-  const client = supabase;
-
-  const queuedDelete = remoteSaveQueue.then(async () => {
-    await throwIfError(
-      client
-        .from('transactions')
-        .delete()
-        .eq('user_id', userId)
-        .eq('id', transactionId)
-    );
-  });
-
-  remoteSaveQueue = queuedDelete.catch(() => undefined);
-
-  return queuedDelete;
+  recordPendingDelete(userId, 'transactions', transactionId);
+  return enqueueExplicitDelete(userId, 'transactions', transactionId);
 }
 
 export function deleteRemoteFutureBill(userId: string, billId: string): Promise<void> {
   if (!supabase) return Promise.resolve();
-  const client = supabase;
-
-  const queuedDelete = remoteSaveQueue.then(async () => {
-    await throwIfError(
-      client
-        .from('future_bills')
-        .delete()
-        .eq('user_id', userId)
-        .eq('id', billId)
-    );
-  });
-
-  remoteSaveQueue = queuedDelete.catch(() => undefined);
-
-  return queuedDelete;
+  recordPendingDelete(userId, 'future_bills', billId);
+  return enqueueExplicitDelete(userId, 'future_bills', billId);
 }
 
 export function deleteRemoteFutureBillsFrom(
@@ -421,28 +549,86 @@ export function deleteRemoteFutureBillsFrom(
 
   if (!supabase) return Promise.resolve();
   const client = supabase;
-
+  const entry = recordPendingSeriesDelete(normalizedUserId, normalizedSeriesId, normalizedOccurrenceNumber);
   const queuedDelete = remoteSaveQueue.then(async () => {
-    await throwIfError(
-      client
-        .from('future_bills')
-        .delete()
-        .eq('user_id', normalizedUserId)
-        .eq('series_id', normalizedSeriesId)
-        .gte('occurrence_number', normalizedOccurrenceNumber)
-    );
+    await assertSessionOwner(client, normalizedUserId);
+    await executeRemoteRequest('future_bills', 'delete', client.from('future_bills').delete()
+      .eq('user_id', normalizedUserId).eq('series_id', normalizedSeriesId)
+      .gte('occurrence_number', normalizedOccurrenceNumber));
+    await assertSessionOwner(client, normalizedUserId);
+    removePendingDelete(normalizedUserId, entry);
   });
-
   remoteSaveQueue = queuedDelete.catch(() => undefined);
-
   return queuedDelete;
+}
+
+function enqueuePendingDeletes(userId: string): Promise<void> {
+  const queued = remoteSaveQueue.then(() => flushPendingDeletes(userId));
+  remoteSaveQueue = queued.catch(() => undefined);
+  return queued;
+}
+
+function enqueueExplicitDelete(userId: string, table: FinancialTable, id: string): Promise<void> {
+  const queued = remoteSaveQueue.then(async () => {
+    const client = supabase;
+    if (!client) return;
+    await assertSessionOwner(client, userId);
+    await executeRemoteRequest(table, 'delete', client.from(table).delete().eq('user_id', userId).eq('id', id));
+    await assertSessionOwner(client, userId);
+    removePendingDelete(userId, { table, id });
+  });
+  remoteSaveQueue = queued.catch(() => undefined);
+  return queued;
+}
+
+async function flushPendingDeletes(userId: string): Promise<void> {
+  if (!supabase) return;
+  const client = supabase;
+  const pending = loadPendingDeletes(userId);
+  if (!pending.length) return;
+  await assertSessionOwner(client, userId);
+  let firstDeleteError: unknown;
+  for (const entry of pending) {
+    try {
+      if ('id' in entry) {
+        await executeRemoteRequest(entry.table, 'delete', client.from(entry.table).delete()
+          .eq('user_id', userId).eq('id', entry.id));
+      } else {
+        await executeRemoteRequest('future_bills', 'delete', client.from('future_bills').delete()
+          .eq('user_id', userId).eq('series_id', entry.seriesId)
+          .gte('occurrence_number', entry.fromOccurrence));
+      }
+      await assertSessionOwner(client, userId);
+      removePendingDelete(userId, entry);
+    } catch (error) {
+      if (error instanceof SessionOwnerError) throw error;
+      if (!firstDeleteError) firstDeleteError = error;
+    }
+  }
+  if (firstDeleteError) throw firstDeleteError;
+}
+
+async function assertSessionOwner(client: NonNullable<typeof supabase>, userId: string) {
+  const { data } = await client.auth.getSession();
+  if (data.session?.user?.id !== userId) {
+    throw new SessionOwnerError('Sessão alterada antes de concluir exclusões pendentes.');
+  }
 }
 
 async function persistRemoteState(userId: string, state: FinanceState) {
   if (!supabase) return;
-  const normalized = normalizeState(state);
+  await assertSessionOwner(supabase, userId);
+  const normalized = normalizeState(withoutExcluded(userId, state));
 
   await preventUnsafeEmptyCollectionOverwrites(userId, normalized);
+  let deleteError: unknown;
+  try {
+    await flushPendingDeletes(userId);
+  } catch (error) {
+    if (error instanceof SessionOwnerError) throw error;
+    deleteError = error;
+  }
+  await assertSessionOwner(supabase, userId);
   await preventUnsafeCatalogOverwrite(userId, normalized);
 
   await executeRemoteRequest('profiles', 'upsert', supabase.from('profiles').upsert({ user_id: userId, updated_at: new Date().toISOString() }));
@@ -472,13 +658,75 @@ async function persistRemoteState(userId: string, state: FinanceState) {
     for (const collection of collections) {
       if (collection.localCount > 0) continue;
 
-      const { count } = await executeRemoteRequest(
+      const { count: totalCount } = await executeRemoteRequest(
         collection.tableName,
         'select',
         supabase.from(collection.tableName).select('id', { count: 'exact', head: true }).eq('user_id', userId)
       );
+      if (totalCount === null || totalCount === undefined) {
+        throw new Error(`Salvamento bloqueado: não foi possível contar ${collection.label} remotos.`);
+      }
+      if (totalCount === 0) continue;
+      const covered = excludedIds(userId, collection.tableName as FinancialTable);
+      const series = collection.tableName === 'future_bills' ? excludedSeries(userId) : [];
+      let uncoveredCount = totalCount;
 
-      if ((count || 0) > 0) {
+      if (totalCount <= 1000) {
+        // The exact count bounds this compatibility query; a truncated response fails closed.
+        const columns = collection.tableName === 'future_bills' ? 'id,series_id,occurrence_number' : 'id';
+        const { data } = await executeRemoteRequest(collection.tableName, 'select',
+          supabase.from(collection.tableName).select(columns).eq('user_id', userId));
+        const rows = Array.isArray(data)
+          ? data as unknown as Array<{ id: string; series_id?: string; occurrence_number?: number }>
+          : [];
+        uncoveredCount = rows.length < totalCount ? 1 : rows.filter((row) => !covered.has(row.id)
+          && !seriesCovers(series, { seriesId: row.series_id, occurrenceNumber: row.occurrence_number })).length;
+      } else {
+        const ids = [...covered];
+        const idFilter = `(${ids.map((id) => `"${id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',')})`;
+        const batches: string[][] = [];
+        for (let index = 0; index < ids.length; index += 100) batches.push(ids.slice(index, index + 100));
+        if (ids.length <= 100) {
+          let query = supabase.from(collection.tableName).select('id', { count: 'exact', head: true }).eq('user_id', userId);
+          if (ids.length) query = query.not('id', 'in', idFilter);
+          const result = await executeRemoteRequest(collection.tableName, 'select', query);
+          if (result.count === null || result.count === undefined) throw new Error('Contagem remota indisponível.');
+          uncoveredCount = result.count;
+        } else {
+          for (const batch of batches) {
+            const result = await executeRemoteRequest(collection.tableName, 'select',
+              supabase.from(collection.tableName).select('id', { count: 'exact', head: true })
+                .eq('user_id', userId).in('id', batch));
+            if (result.count === null || result.count === undefined) throw new Error('Contagem remota indisponível.');
+            uncoveredCount -= result.count;
+          }
+        }
+
+        if (series.length) {
+          const starts = new Map<string, number>();
+          for (const entry of series) starts.set(entry.seriesId,
+            Math.min(starts.get(entry.seriesId) ?? entry.fromOccurrence, entry.fromOccurrence));
+          for (const [seriesId, fromOccurrence] of starts) {
+            let seriesQuery = supabase.from('future_bills').select('id', { count: 'exact', head: true })
+              .eq('user_id', userId).eq('series_id', seriesId).gte('occurrence_number', fromOccurrence);
+            if (ids.length && ids.length <= 100) seriesQuery = seriesQuery.not('id', 'in', idFilter);
+            const result = await executeRemoteRequest(collection.tableName, 'select', seriesQuery);
+            if (result.count === null || result.count === undefined) throw new Error('Contagem remota indisponível.');
+            let seriesCount = result.count;
+            for (const batch of ids.length > 100 ? batches : []) {
+              const overlap = await executeRemoteRequest(collection.tableName, 'select',
+                supabase.from('future_bills').select('id', { count: 'exact', head: true })
+                  .eq('user_id', userId).eq('series_id', seriesId).gte('occurrence_number', fromOccurrence)
+                  .in('id', batch));
+              if (overlap.count === null || overlap.count === undefined) throw new Error('Contagem remota indisponível.');
+              seriesCount -= overlap.count;
+            }
+            uncoveredCount -= seriesCount;
+          }
+        }
+      }
+
+      if (uncoveredCount > 0) {
         throw new Error(
           `Salvamento bloqueado: a coleção de ${collection.label} está vazia, mas existem registros remotos.`
         );
@@ -575,6 +823,7 @@ async function persistRemoteState(userId: string, state: FinanceState) {
     'budgets',
     normalized.budgets.map((item) => budgetToRow(userId, item))
   );
+  if (deleteError) throw deleteError;
 }
 
 async function tryLoadLegacyFinanceState(userId: string): Promise<FinanceState | null> {

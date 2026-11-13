@@ -7,8 +7,10 @@ import type { FinanceState, PageKey } from "./types";
 import { emptyState, normalizeState } from "./data/sample";
 import {
   isSupabaseConfigured, loadLocalState, loadProfile, loadRemoteState, loadUserLocalState, loadUserSyncMetadata,
-  deleteRemoteFutureBill, deleteRemoteFutureBillsFrom, deleteRemoteTransaction, getRemoteErrorDetails,
-  migrateLegacyLocalStateForUser, saveLocalState, saveProfile, saveRemoteState,
+  cleanupConfirmedSyncMetadataOnLogout, recoverCorruptDeletionJournal, deleteRemoteFutureBill, deleteRemoteFutureBillsFrom,
+  deleteRemoteTransaction, getRemoteErrorDetails,
+  loadPendingDeletes, migrateLegacyLocalStateForUser, recordPendingDelete, recordPendingSeriesDelete,
+  saveLocalState, saveProfile, saveRemoteState,
   saveUserLocalConfirmed, saveUserLocalDirty, supabase,
 } from "./lib/storage";
 import { currentMonth } from "./lib/utils";
@@ -67,6 +69,14 @@ function isMissingSessionError(error: unknown) {
 
 type SyncState = "local-only" | "syncing" | "online" | "error";
 
+function isCorruptDeletionJournal(error: unknown) {
+  return error instanceof Error && error.name === 'CorruptDeletionJournalError';
+}
+
+function hasPendingDeletes(userId: string) {
+  return loadPendingDeletes(userId).length > 0;
+}
+
 type PendingRemoteSave = {
   userId: string;
   state: FinanceState;
@@ -90,6 +100,8 @@ export function App() {
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [remoteReady, setRemoteReady] = useState(!isSupabaseConfigured);
+  const [journalBlocked, setJournalBlocked] = useState(false);
+  const [pendingTransactionLabels, setPendingTransactionLabels] = useState<Record<string, string>>({});
   const saveTimer = useRef<number | null>(null);
   const activeSaveRef = useRef<Promise<boolean> | null>(null);
   const pendingSaveRef = useRef<PendingRemoteSave | null>(null);
@@ -112,12 +124,14 @@ export function App() {
     confirmedRevisionRef.current = 0;
     pendingRevisionRef.current = null;
     setRemoteReady(false);
+    setJournalBlocked(false);
     setUserId(null);
     setEmail(null);
     setDisplayName("");
     setDisplayNameDraft("");
     setProfileMessage("");
     setLastSavedAt(null);
+    setPendingTransactionLabels({});
   };
 
   const runRemoteSave = useCallback((remoteUserId: string, remoteState: FinanceState, revision: number) => {
@@ -157,7 +171,9 @@ export function App() {
             if (
               confirmedRevisionRef.current === currentRevisionRef.current
               && !pendingSaveRef.current
+              && !hasPendingDeletes(request.userId)
             ) {
+              setPendingTransactionLabels({});
               setSyncError(null);
               syncErrorRef.current = null;
               setShowSyncDetails(false);
@@ -172,6 +188,7 @@ export function App() {
           latestSaveSucceeded = false;
           const errorDetails = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
           if (activeUserIdRef.current === request.userId) {
+            if (isCorruptDeletionJournal(error)) setJournalBlocked(true);
             syncErrorRef.current = errorDetails;
             setSyncError(errorDetails);
             setSyncState("error");
@@ -225,13 +242,21 @@ export function App() {
       bootStateRef.current = remote;
       remoteLoadPendingRef.current = false;
       setState(remote);
+      setRemoteReady(true);
       setSyncError(null);
       syncErrorRef.current = null;
-      setSyncState("online");
-      setStatus("Online Supabase");
+      if (hasPendingDeletes(remoteUserId)) {
+        setSyncState('syncing');
+        setStatus('Sincronizando exclusões pendentes...');
+        void runRemoteSave(remoteUserId, remote, revision);
+      } else {
+        setSyncState("online");
+        setStatus("Online Supabase");
+      }
       return true;
     } catch (error) {
       if (activeUserIdRef.current !== remoteUserId) return false;
+      if (isCorruptDeletionJournal(error)) setJournalBlocked(true);
       const errorDetails = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
       remoteLoadPendingRef.current = true;
       syncErrorRef.current = errorDetails;
@@ -240,7 +265,7 @@ export function App() {
       setStatus("Erro de sincronização");
       return false;
     }
-  }, []);
+  }, [runRemoteSave]);
 
   useEffect(() => {
     async function initializeAuthenticatedSession(session: { user: { id: string; email?: string } }) {
@@ -248,11 +273,27 @@ export function App() {
       const remoteEmail = session.user.email || null;
       activeUserIdRef.current = remoteUserId;
       setRemoteReady(false);
+      setJournalBlocked(false);
       setStatus("Carregando dados online...");
       setLastSavedAt(null);
       setSaveError(null);
 
-      const local = loadUserLocalState(remoteUserId);
+      let local: FinanceState | null;
+      try {
+        local = loadUserLocalState(remoteUserId);
+      } catch (error) {
+        applyBootState(remoteUserId, remoteEmail, emptyState(), 1, 0);
+        if (isCorruptDeletionJournal(error)) {
+          setJournalBlocked(true);
+          setRemoteReady(false);
+        }
+        const details = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+        syncErrorRef.current = details;
+        setSyncError(details);
+        setSyncState('error');
+        setStatus('Erro de sincronização');
+        return;
+      }
       const metadata = loadUserSyncMetadata(remoteUserId);
       const confirmedRevision = metadata?.confirmedRevision || 0;
       const localRevision = Math.max(metadata?.localRevision || 0, confirmedRevision);
@@ -288,15 +329,29 @@ export function App() {
         applyBootState(remoteUserId, remoteEmail, remote, revision, revision);
         setSyncError(null);
         syncErrorRef.current = null;
-        setSyncState("online");
-        setStatus("Online Supabase");
+        if (hasPendingDeletes(remoteUserId)) {
+          setSyncState('syncing');
+          setStatus('Sincronizando exclusões pendentes...');
+          void runRemoteSave(remoteUserId, remote, revision);
+        } else {
+          setSyncState("online");
+          setStatus("Online Supabase");
+        }
       } catch (error) {
         if (activeUserIdRef.current !== remoteUserId) return;
         const fallback = local || emptyState();
         const revision = Math.max(localRevision, confirmedRevision, 1);
-        if (!local) saveUserLocalConfirmed(remoteUserId, fallback, revision);
+        let failure = error;
+        if (!local) {
+          try { saveUserLocalConfirmed(remoteUserId, fallback, revision); }
+          catch (backupError) { failure = backupError; }
+        }
         applyBootState(remoteUserId, remoteEmail, fallback, revision, revision);
-        const errorDetails = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+        if (isCorruptDeletionJournal(failure)) {
+          setJournalBlocked(true);
+          setRemoteReady(false);
+        }
+        const errorDetails = { ...getRemoteErrorDetails(failure), timestamp: new Date().toISOString() };
         remoteLoadPendingRef.current = true;
         syncErrorRef.current = errorDetails;
         setSyncError(errorDetails);
@@ -341,7 +396,7 @@ export function App() {
       return;
     }
 
-    if (!userId || !remoteReady) return;
+    if (!userId || !remoteReady || journalBlocked) return;
 
     if (bootStateRef.current) {
       if (bootStateRef.current === state) bootStateRef.current = null;
@@ -350,8 +405,19 @@ export function App() {
 
     currentRevisionRef.current += 1;
     const revision = currentRevisionRef.current;
-    saveUserLocalDirty(userId, state, revision, confirmedRevisionRef.current);
+    try {
+      saveUserLocalDirty(userId, state, revision, confirmedRevisionRef.current);
+    } catch (error) {
+      if (isCorruptDeletionJournal(error)) setJournalBlocked(true);
+      const details = getRemoteErrorDetails(error);
+      syncErrorRef.current = details;
+      setSyncError(details);
+      setSyncState('error');
+      setStatus('Erro de sincronização');
+      return;
+    }
     setSyncState(syncErrorRef.current ? "error" : "syncing");
+
 
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current);
@@ -396,27 +462,49 @@ export function App() {
         window.clearTimeout(saveTimer.current);
       }
     };
-  }, [state, userId, remoteReady, runRemoteSave]);
+  }, [state, userId, remoteReady, journalBlocked, runRemoteSave]);
 
   useEffect(() => {
     const retryWhenOnline = () => {
-      if (!userId || !remoteReady) return;
+      if (!userId || !remoteReady || journalBlocked) return;
       if (remoteLoadPendingRef.current) {
         void retryRemoteLoad(userId);
-      } else if (confirmedRevisionRef.current !== currentRevisionRef.current) {
+      } else if (confirmedRevisionRef.current !== currentRevisionRef.current || hasPendingDeletes(userId)) {
         void runRemoteSave(userId, state, currentRevisionRef.current);
       }
     };
 
     window.addEventListener("online", retryWhenOnline);
     return () => window.removeEventListener("online", retryWhenOnline);
-  }, [remoteReady, retryRemoteLoad, runRemoteSave, state, userId]);
+  }, [journalBlocked, remoteReady, retryRemoteLoad, runRemoteSave, state, userId]);
 
   const updateState = useCallback(
     (updater: (prev: FinanceState) => FinanceState) =>
       setState((prev) => normalizeState(updater(prev))),
     [],
   );
+
+  const removeSavedItem = useCallback((table: 'installments' | 'investments' | 'budgets', id: string) => {
+    if (supabase && userId) {
+      try {
+        recordPendingDelete(userId, table, id);
+        setSyncState('syncing');
+        setStatus('Excluindo online...');
+      } catch (error) {
+        const details = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+        syncErrorRef.current = details;
+        setSyncError(details);
+        setSyncState('error');
+        setStatus('Erro de sincronização');
+        setSaveError(details.message);
+        return;
+      }
+    }
+    updateState((previous) => ({
+      ...previous,
+      [table]: previous[table].filter((item) => item.id !== id),
+    }));
+  }, [updateState, userId]);
 
   const removeTransaction = useCallback(async (transactionId: string) => {
     if (saveTimer.current) {
@@ -425,23 +513,7 @@ export function App() {
     }
 
     try {
-      if (supabase && userId && remoteReady) {
-        setStatus("Excluindo lançamento...");
-        setSaveError(null);
-        await deleteRemoteTransaction(userId, transactionId);
-      }
-
-      updateState((previous) => ({
-        ...previous,
-        transactions: previous.transactions.filter(
-          (transaction) => transaction.id !== transactionId,
-        ),
-      }));
-
-      if (supabase && userId && remoteReady) {
-        setLastSavedAt(formatSaveTime());
-        setStatus("Online Supabase");
-      }
+      if (supabase && userId) recordPendingDelete(userId, 'transactions', transactionId);
     } catch (error) {
       console.error(error);
       setSaveError(
@@ -450,9 +522,42 @@ export function App() {
           : "Não foi possível excluir o lançamento online.",
       );
       setStatus("Erro ao excluir lançamento");
+      const details = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+      syncErrorRef.current = details;
+      setSyncError(details);
+      setSyncState('error');
       throw error;
     }
-  }, [remoteReady, updateState, userId]);
+    if (supabase && userId) {
+      setSyncState('syncing');
+      setStatus('Sincronizando exclusões pendentes...');
+      const label = state.transactions.find((item) => item.id === transactionId)?.description;
+      if (label) setPendingTransactionLabels((current) => ({ ...current, [transactionId]: label }));
+    }
+    updateState((previous) => ({
+      ...previous,
+      transactions: previous.transactions.filter((transaction) => transaction.id !== transactionId),
+    }));
+    if (supabase && userId && remoteReady) {
+      try {
+        await deleteRemoteTransaction(userId, transactionId);
+        setPendingTransactionLabels((current) => {
+          const next = { ...current };
+          delete next[transactionId];
+          return next;
+        });
+      } catch (error) {
+        if (saveTimer.current) window.clearTimeout(saveTimer.current);
+        const details = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+        syncErrorRef.current = details;
+        setSyncError(details);
+        setSyncState('error');
+        setStatus('Erro de sincronização');
+        setSaveError(details.message);
+        throw error;
+      }
+    }
+  }, [remoteReady, state.transactions, updateState, userId]);
 
   const removeFutureBill = useCallback(async (billId: string) => {
     if (saveTimer.current) {
@@ -461,21 +566,7 @@ export function App() {
     }
 
     try {
-      if (supabase && userId && remoteReady) {
-        setStatus("Excluindo conta futura...");
-        setSaveError(null);
-        await deleteRemoteFutureBill(userId, billId);
-      }
-
-      updateState((previous) => ({
-        ...previous,
-        bills: previous.bills.filter((bill) => bill.id !== billId),
-      }));
-
-      if (supabase && userId && remoteReady) {
-        setLastSavedAt(formatSaveTime());
-        setStatus("Online Supabase");
-      }
+      if (supabase && userId) recordPendingDelete(userId, 'future_bills', billId);
     } catch (error) {
       console.error(error);
       setSaveError(
@@ -484,7 +575,32 @@ export function App() {
           : "Não foi possível excluir a conta futura online.",
       );
       setStatus("Erro ao excluir conta futura");
+      const details = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+      syncErrorRef.current = details;
+      setSyncError(details);
+      setSyncState('error');
       throw error;
+    }
+    if (supabase && userId) {
+      setSyncState('syncing');
+      setStatus('Sincronizando exclusões pendentes...');
+    }
+    updateState((previous) => ({
+      ...previous,
+      bills: previous.bills.filter((bill) => bill.id !== billId),
+    }));
+    if (supabase && userId && remoteReady) {
+      try { await deleteRemoteFutureBill(userId, billId); }
+      catch (error) {
+        if (saveTimer.current) window.clearTimeout(saveTimer.current);
+        const details = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+        syncErrorRef.current = details;
+        setSyncError(details);
+        setSyncState('error');
+        setStatus('Erro de sincronização');
+        setSaveError(details.message);
+        throw error;
+      }
     }
   }, [remoteReady, updateState, userId]);
 
@@ -499,30 +615,52 @@ export function App() {
     }
 
     try {
-      if (supabase && userId && remoteReady) {
-        setStatus("Excluindo ocorrências futuras...");
-        setSaveError(null);
-        await deleteRemoteFutureBillsFrom(userId, seriesId, occurrenceNumber);
-      }
-
-      updateState((previous) => ({
-        ...previous,
-        bills: previous.bills.filter((bill) =>
-          bill.seriesId !== seriesId ||
-          bill.occurrenceNumber === undefined ||
-          bill.occurrenceNumber < occurrenceNumber
-        ),
-      }));
-
-      if (supabase && userId && remoteReady) {
-        setLastSavedAt(formatSaveTime());
-        setStatus("Online Supabase");
+      if (supabase && userId) {
+        recordPendingSeriesDelete(userId, seriesId.trim(), occurrenceNumber);
+        // This slot may predate the delete and outlive its confirmation.
+        const pending = pendingSaveRef.current;
+        if (pending?.userId === userId) {
+          pendingSaveRef.current = { ...pending, state: {
+            ...pending.state,
+            bills: pending.state.bills.filter((bill) => bill.seriesId !== seriesId.trim()
+              || bill.occurrenceNumber === undefined || bill.occurrenceNumber < occurrenceNumber),
+          } };
+        }
       }
     } catch (error) {
       console.error(error);
       setSaveError(error instanceof Error ? error.message : "Não foi possível excluir as ocorrências online.");
       setStatus("Erro ao excluir contas futuras");
+      const details = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+      syncErrorRef.current = details;
+      setSyncError(details);
+      setSyncState('error');
       throw error;
+    }
+    if (supabase && userId) {
+      setSyncState('syncing');
+      setStatus('Sincronizando exclusões pendentes...');
+    }
+    updateState((previous) => ({
+      ...previous,
+      bills: previous.bills.filter((bill) =>
+        bill.seriesId !== seriesId ||
+        bill.occurrenceNumber === undefined ||
+        bill.occurrenceNumber < occurrenceNumber
+      ),
+    }));
+    if (supabase && userId && remoteReady) {
+      try { await deleteRemoteFutureBillsFrom(userId, seriesId, occurrenceNumber); }
+      catch (error) {
+        if (saveTimer.current) window.clearTimeout(saveTimer.current);
+        const details = { ...getRemoteErrorDetails(error), timestamp: new Date().toISOString() };
+        syncErrorRef.current = details;
+        setSyncError(details);
+        setSyncState('error');
+        setStatus('Erro de sincronização');
+        setSaveError(details.message);
+        throw error;
+      }
     }
   }, [remoteReady, updateState, userId]);
 
@@ -613,6 +751,7 @@ export function App() {
         console.warn("Supabase session was already unavailable during logout.");
       }
 
+      if (userId) cleanupConfirmedSyncMetadataOnLogout(userId);
       clearAuthenticatedSession();
       setStatus("Sessão encerrada");
     } catch (error) {
@@ -646,17 +785,22 @@ export function App() {
     }
   };
 
-  const syncLabel = {
+  const pendingSync = userId ? (() => {
+    try { return hasPendingDeletes(userId); }
+    catch { return true; }
+  })() : false;
+  const syncLabel = pendingSync && syncState === 'error' ? 'Erro de sincronização · alterações pendentes'
+    : pendingSync ? 'Alterações pendentes' : ({
     "local-only": "Salvo localmente",
     syncing: "Sincronizando…",
     online: "Online Supabase",
     error: "Erro de sincronização",
-  }[syncState];
+  }[syncState]);
   const syncStatus = syncLabel;
   const syncTone = syncState === "error" ? "error" : syncState === "syncing" ? "syncing" : "ready";
   const SyncIcon = syncState === "error" ? AlertCircle : syncState === "syncing" ? LoaderCircle : CheckCircle2;
   const retrySync = () => {
-    if (userId && remoteReady) {
+    if (userId && remoteReady && !journalBlocked) {
       if (remoteLoadPendingRef.current) void retryRemoteLoad(userId);
       else void runRemoteSave(userId, state, currentRevisionRef.current);
     }
@@ -664,6 +808,23 @@ export function App() {
     if (isSupabaseConfigured && !userId) {
       return <AuthScreen />;
     }
+  if (journalBlocked) {
+    return <main className="app-shell"><section role="alert" title="Erro de sincronização">
+      <h1>Diário de exclusões corrompido</h1>
+      <p>A sincronização está bloqueada. Recupere o diário para carregar os dados online. O conteúdo corrompido será preservado em :corrupt; exclusões não confirmadas precisarão ser revisadas.</p>
+      {syncError && <p>{syncError.message}</p>}
+      <button type="button" onClick={async () => {
+        if (!userId) return;
+        try {
+          recoverCorruptDeletionJournal(userId);
+          pendingSaveRef.current = null;
+          if (await retryRemoteLoad(userId)) setJournalBlocked(false);
+        } catch (error) {
+          setSyncError(getRemoteErrorDetails(error));
+        }
+      }}>Preservar diário e recuperar dados online</button>
+    </section></main>;
+  }
       
   return (
     <div className="app-shell">
@@ -754,6 +915,12 @@ export function App() {
                   </>
                 )}
                 {saveError && syncState !== "error" && <span className="sync-error-summary">{saveError}</span>}
+                {Object.keys(pendingTransactionLabels).length > 0 && (
+                  <div aria-label="Lançamentos aguardando exclusão" className="sync-details">
+                    <span>Exclusão pendente:</span>
+                    {Object.entries(pendingTransactionLabels).map(([id, label]) => <span key={id}>{label}</span>)}
+                  </div>
+                )}
               </div>
             </div>
             <button type="button" className="sidebar-action" onClick={exportBackup}>
@@ -839,6 +1006,7 @@ export function App() {
               state={state}
               updateState={updateState}
               month={selectedMonth}
+              onDeleteItem={(id) => removeSavedItem('installments', id)}
             />
           )}
           {activePage === "bills" && (
@@ -851,13 +1019,14 @@ export function App() {
             />
           )}
           {activePage === "investments" && (
-            <InvestmentsPage state={state} updateState={updateState} />
+            <InvestmentsPage state={state} updateState={updateState} onDeleteItem={(id) => removeSavedItem('investments', id)} />
           )}
           {activePage === "budgets" && (
             <BudgetsPage
               state={state}
               updateState={updateState}
               month={selectedMonth}
+              onDeleteItem={(id) => removeSavedItem('budgets', id)}
             />
           )}
           {activePage === "settings" && (

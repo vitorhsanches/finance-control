@@ -12,7 +12,8 @@ export function InstallmentsPage({
   state,
   updateState,
   month,
-}: PageProps & { month: string }) {
+  onDeleteItem,
+}: PageProps & { month: string; onDeleteItem?: (id: string) => void }) {
   const [installmentSearch, setInstallmentSearch] = useState("");
   const [installmentCardFilter, setInstallmentCardFilter] = useState("Todos");
   const [installmentCategoryFilter, setInstallmentCategoryFilter] =
@@ -195,11 +196,9 @@ export function InstallmentsPage({
       ),
     }));
 
-  const remove = (id: string) =>
-    updateState((prev) => ({
-      ...prev,
-      installments: prev.installments.filter((i) => i.id !== id),
-    }));
+  const remove = (id: string) => onDeleteItem
+    ? onDeleteItem(id)
+    : updateState((prev) => ({ ...prev, installments: prev.installments.filter((i) => i.id !== id) }));
 
   return (
     <div className="page-stack">
