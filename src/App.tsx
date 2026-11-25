@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle, CheckCircle2, Download, FileUp, LayoutDashboard, ListChecks,
-  LoaderCircle, LogOut, Menu, PiggyBank, Receipt, Settings, WalletCards, X,
+  LoaderCircle, LogOut, Menu, PiggyBank, Receipt, RefreshCw, Settings, Target, WalletCards, X,
 } from "lucide-react";
 import type { FinanceState, PageKey } from "./types";
 import { emptyState, normalizeState } from "./data/sample";
@@ -48,7 +48,7 @@ const navItems: Array<{ id: PageKey; label: string; icon: JSX.Element }> = [
   {
     id: "budgets",
     label: "Metas e orçamento",
-    icon: <WalletCards size={18} />,
+    icon: <Target size={18} />,
   },
   { id: "settings", label: "Configurações", icon: <Settings size={18} /> },
 ];
@@ -59,6 +59,10 @@ const navGroups: Array<{ label: string; items: PageKey[] }> = [
   { label: "Planejamento", items: ["installments", "bills", "budgets", "investments"] },
   { label: "Sistema", items: ["settings"] },
 ];
+
+// Destinos fixos da barra inferior no mobile (<= 720px); os demais ficam no menu.
+const mobilePrimaryPages: PageKey[] = ["dashboard", "transactions", "bills", "budgets"];
+const mobileShortLabels: Partial<Record<PageKey, string>> = { budgets: "Metas" };
 
 function isMissingSessionError(error: unknown) {
   if (!(error instanceof Error)) return false;
@@ -875,6 +879,10 @@ export function App() {
                       type="button"
                       key={item.id}
                       className={activePage === item.id ? "nav active" : "nav"}
+                      data-mobile-primary={mobilePrimaryPages.includes(item.id) ? "true" : undefined}
+                      data-short-label={mobileShortLabels[item.id]}
+                      aria-label={item.label}
+                      title={item.label}
                       aria-current={activePage === item.id ? "page" : undefined}
                       onClick={() => {
                         setActivePage(item.id);
@@ -882,7 +890,7 @@ export function App() {
                       }}
                     >
                       {item.icon}
-                      {item.label}
+                      <span className="nav-label">{item.label}</span>
                     </button>
                   );
                 })}
@@ -893,7 +901,7 @@ export function App() {
           <div className="sidebar-actions">
             <div className={`sidebar-sync ${syncTone}`} role="status" aria-live="polite" title={syncStatus}>
               <SyncIcon size={15} className={syncState === "syncing" ? "spin" : undefined} />
-              <div>
+              <div className="sidebar-sync-text">
                 {status !== syncLabel && <span className="sr-only">{status}</span>}
                 <strong>{syncLabel}</strong>
                 {lastSavedAt && syncState === "online" && <time>Última sincronização: {lastSavedAt}</time>}
@@ -932,17 +940,30 @@ export function App() {
                   </div>
                 )}
               </div>
+              {syncState === "error" && (
+                <button
+                  type="button"
+                  className="sync-retry-inline"
+                  aria-label="Tentar sincronizar novamente"
+                  title="Tentar sincronizar novamente"
+                  onClick={retrySync}
+                >
+                  <RefreshCw size={13} aria-hidden="true" />
+                  <span>Tentar</span>
+                </button>
+              )}
             </div>
-            <button type="button" className="sidebar-action" onClick={exportBackup}>
-              <Download size={16} /> Exportar backup
+            <button type="button" className="sidebar-action" title="Exportar backup" onClick={exportBackup}>
+              <Download size={16} /> <span className="sidebar-action-label">Exportar backup</span>
             </button>
 
             <button
               type="button"
               className="sidebar-action file-label"
+              title="Importar backup"
               onClick={() => backupInputRef.current?.click()}
             >
-              <FileUp size={16} /> Importar backup
+              <FileUp size={16} /> <span className="sidebar-action-label">Importar backup</span>
             </button>
             <input
               ref={backupInputRef}
@@ -959,10 +980,11 @@ export function App() {
             {userId && (
               <button
                 className="sidebar-action sidebar-logout"
+                title="Sair"
                 onClick={handleLogout}
                 disabled={logoutLoading}
               >
-                <LogOut size={16} /> {logoutLoading ? "Saindo..." : "Sair"}
+                <LogOut size={16} /> <span className="sidebar-action-label">{logoutLoading ? "Saindo..." : "Sair"}</span>
               </button>
             )}
           </div>
