@@ -188,7 +188,7 @@ test.describe("mobile (<= 720px)", () => {
   });
 
   test("does not let the bottom bar cover the end of the page", async ({ page }) => {
-    await expect(page.getByRole("region", { name: "Disponível no mês" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Resumo do mês" })).toBeVisible();
     const barTop = (await page.locator("aside.sidebar").boundingBox())!.y;
     await expect.poll(async () => {
       await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
