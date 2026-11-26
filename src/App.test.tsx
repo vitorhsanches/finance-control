@@ -161,7 +161,7 @@ describe('application flows', () => {
     render(<App />);
     expect(screen.getByText('Sem compromissos no mês selecionado.')).toBeInTheDocument();
     expect(screen.getByText('Nenhuma conta vencendo nos próximos 7 dias.')).toBeInTheDocument();
-    const summary = screen.getByRole('region', { name: 'Disponível no mês' });
+    const summary = screen.getByRole('region', { name: 'Resumo do mês' });
     expect(within(summary).getAllByText(/R\$\s*0/).length).toBeGreaterThan(0);
     expect(within(summary).getByText('Dentro do planejado')).toBeInTheDocument();
   });
@@ -169,15 +169,15 @@ describe('application flows', () => {
   it('shows the primary metrics and updates them when the selected month changes', async () => {
     render(<App />);
 
-    const summary = screen.getByRole('region', { name: 'Disponível no mês' });
-    expect(within(summary).getByText('Receitas')).toBeInTheDocument();
-    expect(within(summary).getByText('Gastos')).toBeInTheDocument();
+    const summary = screen.getByRole('region', { name: 'Resumo do mês' });
+    expect(within(summary).getByText('Entradas')).toBeInTheDocument();
+    expect(within(summary).getByText('Saídas')).toBeInTheDocument();
     expect(within(summary).getByText('Compromissos futuros')).toBeInTheDocument();
-    expect(within(summary).getByText('Gastos').parentElement).toHaveTextContent(/R\$\s*160/);
+    expect(within(summary).getByText('Saídas').parentElement).toHaveTextContent(/R\$\s*160/);
 
     fireEvent.change(screen.getByLabelText('Mês'), { target: { value: '2026-06' } });
 
-    expect(within(summary).getByText('Gastos').parentElement).toHaveTextContent(/R\$\s*10/);
+    expect(within(summary).getByText('Saídas').parentElement).toHaveTextContent(/R\$\s*10/);
   });
 
   it('keeps financial insights collapsed by default and toggles them open and closed', async () => {

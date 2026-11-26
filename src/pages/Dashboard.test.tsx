@@ -46,3 +46,53 @@ describe('Dashboard commitments chart', () => {
     expect(screen.getByText(/são estados diferentes e podem conter itens ainda não reconciliados/i)).toBeInTheDocument();
   });
 });
+
+describe('Dashboard 2.0 layout', () => {
+  it('uses approved labels, removes duplicate hero rows, and reads reserves from settings', () => {
+    const state = emptyState();
+    state.settings.monthlySavingGoal = 725;
+    state.settings.emergencyContribution = 125;
+    render(<Dashboard state={state} month="2026-07" displayName="Teste" email={null} />);
+
+    expect(screen.getByText('Disponível previsto ao fim do mês')).toBeInTheDocument();
+    expect(screen.getByText('Saldo acumulado')).toBeInTheDocument();
+    expect(screen.getByText('Entradas')).toBeInTheDocument();
+    expect(screen.getByText('Saídas')).toBeInTheDocument();
+    expect(screen.getByText('Economia planejada')).toBeInTheDocument();
+    expect(screen.getByText('Reserva de emergência')).toBeInTheDocument();
+    const summary = screen.getByRole('region', { name: 'Resumo do mês' });
+    const primary = summary.querySelector('.dash-primary');
+    expect(primary).not.toHaveTextContent('Receitas');
+    expect(primary).not.toHaveTextContent('Gastos');
+    expect(primary).toHaveTextContent(/R\$\s*725/);
+    expect(primary).toHaveTextContent(/R\$\s*125/);
+  });
+
+  it('renders an accessible budget progress image and a negative status', () => {
+    const state = emptyState();
+    state.settings.selectedMonth = '2026-07';
+    state.budgets = [{ id: 'food-budget', month: '2026-07', category: 'Alimentação', monthlyBudget: 100 }];
+    state.transactions = [{
+      id: 'food-expense', date: '2026-07-08', description: 'Compra', type: 'expense', category: 'Alimentação',
+      amount: 125, paymentMethod: 'Pix', accountOrCard: 'Conta', essential: true, paid: true,
+    }];
+    render(<Dashboard state={state} month="2026-07" displayName="Teste" email={null} />);
+
+    expect(screen.getAllByText('Passou')).toHaveLength(2);
+    expect(screen.getAllByRole('img', { name: /Alimentação: R\$\s*125 gastos de R\$\s*100 de limite/ })).toHaveLength(2);
+  });
+});
+
+describe('Dashboard personalized greeting', () => {
+  it.each([
+    { displayName: 'Ana Teste', email: 'ana@exemplo.test', greeting: 'Olá, Ana Teste 👋' },
+    { displayName: '   ', email: 'bruno@exemplo.test', greeting: 'Olá, bruno 👋' },
+    { displayName: '', email: null, greeting: 'Olá, bem-vindo 👋' },
+  ])('renders "$greeting" from the available fictional profile fields', ({ displayName, email, greeting }) => {
+    render(<Dashboard state={emptyState()} month="2026-07" displayName={displayName} email={email} />);
+
+    const welcome = screen.getByText(greeting);
+    expect(welcome).toBeInTheDocument();
+    expect(welcome.closest('.mobile-hidden')).not.toBeNull();
+  });
+});

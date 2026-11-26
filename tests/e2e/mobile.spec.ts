@@ -16,10 +16,10 @@ test("opens the mobile navigation and reaches a lazy-loaded page", async ({ page
 
 test("renders the financial summary without horizontal overflow", async ({ page }) => {
   await page.goto("/");
-  const summary = page.getByRole("region", { name: "Disponível no mês" });
+  const summary = page.getByRole("region", { name: "Resumo do mês" });
   await expect(summary).toBeVisible();
-  await expect(summary.getByText("Receitas")).toBeVisible();
-  await expect(summary.getByText("Gastos")).toBeVisible();
+  await expect(summary.getByText("Entradas", { exact: true })).toBeVisible();
+  await expect(summary.getByText("Saídas", { exact: true })).toBeVisible();
   await expect(summary.getByText("Compromissos futuros")).toBeVisible();
 
   const hasHorizontalOverflow = await page.evaluate(
